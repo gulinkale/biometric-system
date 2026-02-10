@@ -6,6 +6,9 @@ from app.domain.schemas import VerifyRequest, VerifyResponse
 from app.services.authentication_service import AuthenticationService
 from app.utils.audio_io import b64_to_wav_mono
 from app.utils.image_io import b64_to_bgr_image
+from app.utils.audio_decode import decode_voice_base64_to_np
+
+
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -28,7 +31,7 @@ async def verify(req: VerifyRequest, session: AsyncSession = Depends(get_session
     sr = None
     if req.voice_wav_b64:
         try:
-            audio, sr = b64_to_wav_mono(req.voice_wav_b64)
+            audio, sr = decode_voice_base64_to_np(req.voice_wav_b64)
         except ValueError as e:
             _bad_request(str(e))
 
