@@ -35,19 +35,21 @@
       <button class="btn" onclick="captureFace()">Capture</button>
     </div>
 
-    <!-- STEP 3B: VOICE -->
-<div class="card hidden" id="step-voice">
-  <h2>Voice Identification</h2>
-  <p>Please speak for 3-5 seconds</p>
+    <!-- STEP 3B: VOICE CAPTURE -->
+    <div class="card hidden" id="step-voice">
+      <h2>Voice Identification</h2>
+      <p>Please speak after you press Record</p>
 
-  <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
-    <button class="btn" id="btn-voice-start" onclick="startVoiceRecord()">Start</button>
-    <button class="btn" id="btn-voice-stop" onclick="stopVoiceRecord()" disabled>Stop</button>
-    <button class="btn" id="btn-voice-send" onclick="sendVoice()" disabled>Send</button>
-  </div>
+      <div class="voice-controls">
+        <button class="btn" id="btn-record" onclick="startVoiceRecording()">Record</button>
+        <button class="btn hidden" id="btn-stop" onclick="stopVoiceRecording()">Stop</button>
+      </div>
 
-  <audio id="audio-preview" class="hidden" controls style="margin-top:16px; width:100%;"></audio>
-</div>
+      <p id="voice-status" style="margin-top:12px; font-size:14px; opacity:0.8;"></p>
+
+      <button class="btn" onclick="sendVoice()">Verify Voice</button>
+    </div>
+
 
 
     <!-- STEP 4: RESULT -->
