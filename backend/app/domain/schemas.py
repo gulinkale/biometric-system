@@ -33,3 +33,4 @@ class VerifyResponse(BaseModel):
     face_score: float
     voice_score: float
     reason: str
+    identified_user: Optional[str] = None

@@ -7,8 +7,16 @@ from app.core.config import settings
 from app.api.routes_auth import router as auth_router
 from app.db.session import engine
 from app.db.models import Base
+from fastapi import APIRouter
+from app.api.routes_enrollment import router as enroll_router
 
 app = FastAPI(title=settings.APP_NAME)
+
+#routers
+app.include_router(auth_router)
+app.include_router(enroll_router)
+
+
 
 # If your UI runs on a different port/domain, enable CORS.
 # You can tighten this later (e.g., only your UI origin).
