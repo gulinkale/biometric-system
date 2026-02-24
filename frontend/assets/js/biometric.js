@@ -1,10 +1,8 @@
-// frontend/app.js
+// frontend/assets/js/biometric.js
 
 // =========================
 // 0) STEP NAVIGATION (GLOBAL)
 // =========================
-
-/*
 let selectedCompany = null;
 let selectedMethod = null;
 
@@ -12,30 +10,30 @@ function showStep(stepIdToShow) {
   const steps = ["step-company", "step-enroll", "step-method", "step-face", "step-voice", "step-result"];
   steps.forEach((id) => {
     const el = document.getElementById(id);
-    if (!el) return;
+    if (!el) return; // sayfada yoksa geç
     el.classList.toggle("hidden", id !== stepIdToShow);
   });
 }
 window.showStep = showStep;
-window.startCamera = startCamera;
 
 // Aktif step'e göre video/canvas seç (EN ÖNEMLİ FIX)
 function getActiveVideoEl() {
   const stepFace = document.getElementById("step-face");
   const faceVisible = stepFace && !stepFace.classList.contains("hidden");
 
-  if (faceVisible) return document.getElementById("video");     // step-face içindeki video
-  return document.getElementById("camVideo");                   // enrollment video
+  if (faceVisible) return document.getElementById("video"); // step-face içindeki video
+  return document.getElementById("camVideo");               // enrollment video
 }
 
 function getActiveCanvasEl() {
   const stepFace = document.getElementById("step-face");
   const faceVisible = stepFace && !stepFace.classList.contains("hidden");
 
-  if (faceVisible) return document.getElementById("canvas");    // step-face içindeki canvas
-  return document.getElementById("camCanvas");                  // enrollment canvas
+  if (faceVisible) return document.getElementById("canvas"); // step-face içindeki canvas
+  return document.getElementById("camCanvas");               // enrollment canvas
 }
 
+// company/method/restart fonksiyonlarını globalde tutuyoruz (HTML onclick kullanıyor)
 window.selectCompany = function (company) {
   selectedCompany = company;
   console.log("Selected company:", selectedCompany);
@@ -48,8 +46,7 @@ window.selectMethod = async function (method) {
 
   if (method === "face") {
     showStep("step-face");
-    // ✅ eskisi gibi: face ekranına geçince kamerayı otomatik aç
-    await startCamera();
+    await startCamera(); // face ekranına geçince kamerayı otomatik aç
   } else if (method === "voice") {
     showStep("step-voice");
   }
@@ -62,10 +59,6 @@ window.restart = function () {
   showStep("step-company");
 };
 
-window.addEventListener("DOMContentLoaded", () => {
-  showStep("step-company");
-});
-
 // =========================
 // 1) ENROLLMENT (CAMERA + API)
 // =========================
@@ -73,6 +66,7 @@ window.addEventListener("DOMContentLoaded", () => {
 // ⚠️ Backend URL
 const API_BASE = "http://127.0.0.1:8000";
 
+// stream/timer/state
 let mediaStream = null;
 let captureTimer = null;
 
@@ -81,20 +75,10 @@ let targetSamples = 15;
 let acceptedSamples = 0;
 let isCapturing = false;
 
-// --- UI elements ---
-const usernameEl = document.getElementById("username");
-const roleEl = document.getElementById("role");
-
-const btnStartCam = document.getElementById("btnStartCam");
-const btnStopCam = document.getElementById("btnStopCam");
-
-const btnStartEnroll = document.getElementById("btnStartEnroll");
-const btnStopEnroll = document.getElementById("btnStopEnroll");
-
-const statusEl = document.getElementById("statusText");
-const sessionEl = document.getElementById("sessionText");
-const progressEl = document.getElementById("progressText");
-const progressBarEl = document.getElementById("progressBar");
+// --- UI elements (sayfaya göre var/yok olabilir) ---
+let usernameEl, roleEl;
+let btnStartCam, btnStopCam, btnStartEnroll, btnStopEnroll;
+let statusEl, sessionEl, progressEl, progressBarEl;
 
 // -------------------------
 // Helpers
@@ -157,6 +141,7 @@ async function startCamera() {
     setStatus("Camera error: permission or device issue. (Console'a bak)");
   }
 }
+window.startCamera = startCamera;
 
 function stopCamera() {
   if (captureTimer) {
@@ -177,6 +162,7 @@ function stopCamera() {
 
   setStatus("Camera stopped.");
 }
+window.stopCamera = stopCamera;
 
 // -------------------------
 // Capture frame -> base64 JPEG
@@ -197,11 +183,10 @@ function captureFrameBase64() {
 
   const dataUrl = c.toDataURL("image/jpeg", 0.85);
   return dataUrl.split(",")[1];
-
 }
 
 // -------------------------
-// API calls
+// API calls (ENROLL)
 // -------------------------
 async function apiStartEnroll(username, role) {
   const res = await fetch(`${API_BASE}/enroll/start`, {
@@ -350,10 +335,10 @@ async function stopEnrollmentFlow(doFinish) {
 // IDENTIFY (Face) API
 // -------------------------
 async function apiIdentifyFace(face_image_b64) {
-  const res = await fetch(`${API_BASE}/identify/`, {   // ✅ DOĞRU PATH
+  const res = await fetch(`${API_BASE}/identify/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ face_image_b64 }),          // ✅ Backend bunu bekliyor
+    body: JSON.stringify({ face_image_b64 }),
   });
 
   if (!res.ok) {
@@ -369,7 +354,6 @@ async function apiIdentifyFace(face_image_b64) {
 // -------------------------
 window.captureFace = async function () {
   try {
-    // 1) Frame al
     const b64 = captureFrameBase64();
     if (!b64) {
       setStatus("Frame alınamadı. Kamera açık mı?");
@@ -378,12 +362,7 @@ window.captureFace = async function () {
 
     setStatus("Capturing... Identifying face...");
 
-    // 2) Backend'e gönder
     const result = await apiIdentifyFace(b64);
-
-    // 3) Sonucu ekrana bas
-    // Beklenen result örneği (senin AuthenticationService identify_face gibi):
-    // { identified: true/false, username, user_id, similarity }
 
     const decisionEl = document.getElementById("result-decision");
     const faceScoreEl = document.getElementById("face-score");
@@ -400,7 +379,6 @@ window.captureFace = async function () {
     if (voiceScoreEl) voiceScoreEl.textContent = "-";
     if (fusionScoreEl) fusionScoreEl.textContent = "-";
 
-    // 4) Result step'e geç
     showStep("step-result");
     setStatus("Done.");
   } catch (e) {
@@ -410,18 +388,40 @@ window.captureFace = async function () {
 };
 
 // -------------------------
-// Button bindings (NULL-SAFE)
+// Init + Button bindings (NULL-SAFE)
 // -------------------------
-if (btnStartCam) btnStartCam.addEventListener("click", startCamera);
-if (btnStopCam) btnStopCam.addEventListener("click", stopCamera);
+function bindBiometricUI() {
+  // elementleri burada alıyoruz ki sayfa yüklenmeden null olmasın
+  usernameEl = document.getElementById("username");
+  roleEl = document.getElementById("role");
 
-if (btnStartEnroll) btnStartEnroll.addEventListener("click", startEnrollmentFlow);
-if (btnStopEnroll) btnStopEnroll.addEventListener("click", () => stopEnrollmentFlow(false));
+  btnStartCam = document.getElementById("btnStartCam");
+  btnStopCam = document.getElementById("btnStopCam");
+  btnStartEnroll = document.getElementById("btnStartEnroll");
+  btnStopEnroll = document.getElementById("btnStopEnroll");
 
-// İlk yüklemede enrollment UI
-setSession(null);
-setProgress(0, targetSamples);
-setStatus("Ready.");
-if (btnStopEnroll) btnStopEnroll.disabled = true;
+  statusEl = document.getElementById("statusText");
+  sessionEl = document.getElementById("sessionText");
+  progressEl = document.getElementById("progressText");
+  progressBarEl = document.getElementById("progressBar");
 
-*/
+  if (btnStartCam) btnStartCam.addEventListener("click", startCamera);
+  if (btnStopCam) btnStopCam.addEventListener("click", stopCamera);
+
+  if (btnStartEnroll) btnStartEnroll.addEventListener("click", startEnrollmentFlow);
+  if (btnStopEnroll) btnStopEnroll.addEventListener("click", () => stopEnrollmentFlow(false));
+
+  // ilk durum (bu elementler yoksa zaten sadece console’a yazar)
+  setSession(null);
+  setProgress(0, targetSamples);
+  setStatus("Ready.");
+  if (btnStopEnroll) btnStopEnroll.disabled = true;
+
+  // step yapısı bu sayfada varsa başlangıç step’i
+  const hasCompanyStep = document.getElementById("step-company");
+  if (hasCompanyStep) {
+    showStep("step-company");
+  }
+}
+
+window.addEventListener("DOMContentLoaded", bindBiometricUI);
