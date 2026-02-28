@@ -7,10 +7,10 @@ let selectedCompany = null;
 let selectedMethod = null;
 
 function showStep(stepIdToShow) {
-  const steps = ["step-company", "step-enroll", "step-method", "step-face", "step-voice", "step-result"];
+  const steps = ["step-method", "step-face", "step-voice", "step-result"];
   steps.forEach((id) => {
     const el = document.getElementById(id);
-    if (!el) return; // sayfada yoksa geç
+    if (!el) return;
     el.classList.toggle("hidden", id !== stepIdToShow);
   });
 }
@@ -22,7 +22,7 @@ function getActiveVideoEl() {
   const faceVisible = stepFace && !stepFace.classList.contains("hidden");
 
   if (faceVisible) return document.getElementById("video"); // step-face içindeki video
-  return document.getElementById("camVideo");               // enrollment video
+  return document.getElementById("camVideo"); // enrollment video
 }
 
 function getActiveCanvasEl() {
@@ -30,15 +30,8 @@ function getActiveCanvasEl() {
   const faceVisible = stepFace && !stepFace.classList.contains("hidden");
 
   if (faceVisible) return document.getElementById("canvas"); // step-face içindeki canvas
-  return document.getElementById("camCanvas");               // enrollment canvas
+  return document.getElementById("camCanvas"); // enrollment canvas
 }
-
-// company/method/restart fonksiyonlarını globalde tutuyoruz (HTML onclick kullanıyor)
-window.selectCompany = function (company) {
-  selectedCompany = company;
-  console.log("Selected company:", selectedCompany);
-  showStep("step-method");
-};
 
 window.selectMethod = async function (method) {
   selectedMethod = method;
@@ -54,9 +47,7 @@ window.selectMethod = async function (method) {
 
 window.restart = function () {
   selectedCompany = null;
-  selectedMethod = null;
-  console.log("Restart");
-  showStep("step-company");
+  showStep("step-home");
 };
 
 // =========================
@@ -321,7 +312,9 @@ async function stopEnrollmentFlow(doFinish) {
   if (doFinish && enrollSessionId) {
     try {
       const result = await apiFinishEnroll(enrollSessionId);
-      setStatus(`Saved: ${result.status || "OK"} (samples: ${result.n_samples || acceptedSamples})`);
+      setStatus(
+        `Saved: ${result.status || "OK"} (samples: ${result.n_samples || acceptedSamples})`,
+      );
     } catch (e) {
       console.error(e);
       setStatus(`Finish error: ${e.message}`);
@@ -370,12 +363,14 @@ window.captureFace = async function () {
     const fusionScoreEl = document.getElementById("fusion-score");
 
     if (result.identified) {
-      if (decisionEl) decisionEl.textContent = `✅ IDENTIFIED: ${result.username} (id=${result.user_id})`;
+      if (decisionEl)
+        decisionEl.textContent = `✅ IDENTIFIED: ${result.username} (id=${result.user_id})`;
     } else {
       if (decisionEl) decisionEl.textContent = `❌ NOT IDENTIFIED`;
     }
 
-    if (faceScoreEl) faceScoreEl.textContent = (result.similarity ?? 0).toFixed(3);
+    if (faceScoreEl)
+      faceScoreEl.textContent = (result.similarity ?? 0).toFixed(3);
     if (voiceScoreEl) voiceScoreEl.textContent = "-";
     if (fusionScoreEl) fusionScoreEl.textContent = "-";
 
@@ -385,6 +380,39 @@ window.captureFace = async function () {
     console.error(e);
     setStatus(`Capture/Identify error: ${e.message}`);
   }
+};
+
+// --- simple in-tab page history (biometric flow) ---
+(function trackPrevPage() {
+  try {
+    const prev = sessionStorage.getItem("prevPath");
+    const last = sessionStorage.getItem("lastPath");
+
+    // her sayfa açılışında: prev <- last, last <- current
+    sessionStorage.setItem("prevPath", last || "");
+    sessionStorage.setItem("lastPath", window.location.pathname);
+  } catch (e) {
+    // ignore
+  }
+})();
+
+window.goBack = function () {
+  const prevPath = sessionStorage.getItem("prevPath");
+
+  // Eğer prevPath varsa ve biometric içinde bir sayfaysa, oraya dön
+  if (prevPath && prevPath.includes("/biometric/")) {
+    window.location.href = prevPath;
+    return;
+  }
+
+  // yoksa tarayıcı back dene
+  if (window.history.length > 1) {
+    window.history.back();
+    return;
+  }
+
+  // en son fallback
+  window.location.href = "/portal/login_portal.html";
 };
 
 // -------------------------
@@ -408,8 +436,10 @@ function bindBiometricUI() {
   if (btnStartCam) btnStartCam.addEventListener("click", startCamera);
   if (btnStopCam) btnStopCam.addEventListener("click", stopCamera);
 
-  if (btnStartEnroll) btnStartEnroll.addEventListener("click", startEnrollmentFlow);
-  if (btnStopEnroll) btnStopEnroll.addEventListener("click", () => stopEnrollmentFlow(false));
+  if (btnStartEnroll)
+    btnStartEnroll.addEventListener("click", startEnrollmentFlow);
+  if (btnStopEnroll)
+    btnStopEnroll.addEventListener("click", () => stopEnrollmentFlow(false));
 
   // ilk durum (bu elementler yoksa zaten sadece console’a yazar)
   setSession(null);
@@ -420,8 +450,27 @@ function bindBiometricUI() {
   // step yapısı bu sayfada varsa başlangıç step’i
   const hasCompanyStep = document.getElementById("step-company");
   if (hasCompanyStep) {
-    showStep("step-company");
+    showStep("step-home");
   }
 }
 
-window.addEventListener("DOMContentLoaded", bindBiometricUI);
+window.addEventListener("DOMContentLoaded", () => {
+  // Verify/Identify step sayfasıysa:
+  if (document.getElementById("step-method")) {
+    showStep("step-method");
+  }
+
+  // Enroll sayfasıysa (en azından username inputu varsa):
+  if (document.getElementById("btnStartCam") || document.getElementById("username")) {
+    bindBiometricUI();
+  }
+});
+
+
+// Reset verify flow (same page step navigation, not browser back)
+function restartVerify() {
+  // kamera açıksa kapat
+  if (window.stopCamera) window.stopCamera();
+  // tekrar method ekranına dön
+  if (window.showStep) window.showStep("step-method");
+}

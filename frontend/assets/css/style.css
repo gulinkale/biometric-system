@@ -15,6 +15,11 @@ body {
   width: 420px;
 }
 
+.wizard {
+  position: relative;
+  min-height: 260px; /* kart yüksekliği kadar alan */
+}
+
 .card {
   background: #e6e6e6;
   padding: 30px;
@@ -50,7 +55,7 @@ video {
 }
 
 .hidden {
-  display: none;
+  display: none !important;
 }
 
 .score-box {
@@ -59,5 +64,34 @@ video {
   border-radius: 12px;
   margin: 15px 0;
   font-size: 14px;
+}
+
+.status-text {
+  margin-top: 12px;
+  font-size: 13px;
+  color: #333;
+  min-height: 18px;
+}
+
+.wizard .step {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+@keyframes stepFadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.wizard .step.step-animate {
+  animation: stepFadeInUp 0.25s ease-out;
 }
 

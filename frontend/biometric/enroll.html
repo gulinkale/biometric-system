@@ -1,53 +1,77 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Enrollment | Biometric Module</title>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Enroll | Biometric System</title>
+    <link rel="stylesheet" href="../assets/css/style.css" />
+  </head>
 
-  <!-- NEW PATH -->
-  <link rel="stylesheet" href="../assets/css/style.css" />
-</head>
-<body>
+  <body>
+    <div class="app-container">
+      <div class="card">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+          <h2 style="margin:0;">Enrollment (Admin)</h2>
+          <a href="/portal/login_portal.html" style="text-decoration:none;">← Back to Portal</a>
+        </div>
 
-  <div class="app-container">
-
-    <div class="card" id="step-enroll">
-      <h2>Enrollment</h2>
-
-      <input id="username" placeholder="username" />
-      <input id="role" placeholder="role (e.g. user)" value="user" />
-
-      <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
-        <button class="btn" id="btnStartCam">Start Camera</button>
-        <button class="btn" id="btnStopCam">Stop Camera</button>
+        <p style="margin-top:10px; opacity:.75;">
+          This page is intended for enrollment only (hidden/admin). Access via URL.
+        </p>
       </div>
 
-      <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:12px;">
-        <button class="btn" id="btnStartEnroll">Start Enrollment</button>
-        <button class="btn" id="btnStopEnroll">Stop Enrollment</button>
+      <!-- USER INFO -->
+      <div class="card">
+        <h2>User Info</h2>
+
+        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <div style="flex:1; min-width:220px;">
+            <label style="display:block; margin-bottom:6px;">Username</label>
+            <input id="username" placeholder="e.g. gulin.kale" style="width:100%; padding:10px; border-radius:10px; border:1px solid #ddd;" />
+          </div>
+
+          <div style="flex:1; min-width:220px;">
+            <label style="display:block; margin-bottom:6px;">Role</label>
+            <input id="role" placeholder="e.g. student" style="width:100%; padding:10px; border-radius:10px; border:1px solid #ddd;" />
+          </div>
+        </div>
+
+        <p id="sessionText" style="margin-top:10px; opacity:.8;">Session: -</p>
       </div>
 
-      <p id="statusText">...</p>
-      <p id="sessionText">Session: -</p>
-      <p id="progressText">0/15</p>
+      <!-- CAMERA -->
+      <div class="card">
+        <h2>Face Capture</h2>
+        <p style="opacity:.75;">Start camera, then start enrollment. Samples will be collected automatically.</p>
 
-      <div style="width: 300px; height: 10px; background: #ddd; border-radius: 8px; overflow:hidden; margin: 0 auto;">
-        <div id="progressBar" style="width:0%; height:100%; background:#4caf50;"></div>
+        <video id="camVideo" autoplay playsinline style="width:100%; border-radius:16px; background:#111; min-height:220px;"></video>
+        <canvas id="camCanvas" class="hidden"></canvas>
+
+        <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:14px;">
+          <button class="btn" id="btnStartCam" type="button">Start Camera</button>
+          <button class="btn" id="btnStopCam" type="button">Stop Camera</button>
+        </div>
+
+        <div style="margin-top:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+            <span style="opacity:.8;">Progress:</span>
+            <span id="progressText" style="font-weight:600;">0/15</span>
+          </div>
+
+          <div style="width:100%; height:10px; background:#eee; border-radius:999px; overflow:hidden; margin-top:8px;">
+            <div id="progressBar" style="height:100%; width:0%; background:#111;"></div>
+          </div>
+        </div>
+
+        <p id="statusText" style="margin-top:12px; opacity:.85;">Ready.</p>
+
+        <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:14px;">
+          <button class="btn" id="btnStartEnroll" type="button">Start Enrollment</button>
+          <button class="btn" id="btnStopEnroll" type="button">Stop</button>
+        </div>
       </div>
-
-      <video id="camVideo" autoplay playsinline style="width:320px; border-radius:10px; margin-top:16px;"></video>
-      <canvas id="camCanvas" style="display:none;"></canvas>
-
-      <!-- Back: istersen portal/login'e ya da identify'a döndür -->
-      <button class="btn" style="margin-top:16px;"
-              onclick="window.location.href='../portal/login.html'">
-        Back
-      </button>
     </div>
 
-  </div>
-
-  <!-- NEW PATH -->
-  <script src="../assets/js/biometric.js"></script>
-</body>
+    <script src="../assets/js/biometric.js"></script>
+  </body>
 </html>
