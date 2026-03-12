@@ -1,4 +1,4 @@
-#Takes raw facial/voice data and converts it into an authentication decision.
+# Takes raw facial/voice data and converts it into an authentication decision.
 
 from __future__ import annotations
 
@@ -18,9 +18,9 @@ class AuthenticationService:
         self.face = FaceProcessor()
         self.voice = VoiceProcessor()
 
-        # thresholds (ürün için sonra config'e taşırız)
+        # thresholds
         self.fusion_thr = 0.75
-        self.identification_thr = 0.35  # face cosine similarity
+        self.identification_thr = 0.35
         self.voice_ident_thr = 0.55
 
     # =====================================================
@@ -41,6 +41,46 @@ class AuthenticationService:
         return float(
             np.dot(a, b) / ((np.linalg.norm(a) + 1e-8) * (np.linalg.norm(b) + 1e-8))
         )
+
+    # =====================================================
+    # Portal Login
+    # =====================================================
+
+    async def login_user(
+        self,
+        session: AsyncSession,
+        username: str,
+        password: str,
+    ) -> dict:
+        result = await session.execute(
+            select(User).where(User.username == username)
+        )
+        user = result.scalar_one_or_none()
+
+        if user is None:
+            return {
+                "success": False,
+                "message": "USER_NOT_FOUND",
+            }
+
+        if not user.is_active:
+            return {
+                "success": False,
+                "message": "USER_INACTIVE",
+            }
+
+        if user.password_hash != password:
+            return {
+                "success": False,
+                "message": "INVALID_PASSWORD",
+            }
+
+        return {
+            "success": True,
+            "message": "LOGIN_SUCCESS",
+            "username": user.username,
+            "role": user.role,
+        }
 
     # ---------------- Face embedding ----------------
 
@@ -69,7 +109,7 @@ class AuthenticationService:
             return None
 
     # =====================================================
-    # Enrollment - FACE (template-based only)
+    # Enrollment - FACE
     # =====================================================
 
     async def enroll_user_with_template(
@@ -83,7 +123,6 @@ class AuthenticationService:
         result = await session.execute(select(User).where(User.username == username))
         user = result.scalar_one_or_none()
 
-        # ✅ mevcut kullanıcı yoksa yeni kullanıcı yaratma
         if user is None:
             return {"status": "FAILED", "reason": "USER_NOT_FOUND"}
 
@@ -134,7 +173,7 @@ class AuthenticationService:
         }
 
     # =====================================================
-    # Enrollment - VOICE (IDENTITY)
+    # Enrollment - VOICE
     # =====================================================
 
     async def enroll_voice(
@@ -148,7 +187,6 @@ class AuthenticationService:
         result = await session.execute(select(User).where(User.username == username))
         user = result.scalar_one_or_none()
 
-        # ✅ mevcut kullanıcı yoksa yeni kullanıcı yaratma
         if user is None:
             return {"status": "FAILED", "reason": "USER_NOT_FOUND"}
 
@@ -264,7 +302,7 @@ class AuthenticationService:
         return await self.identify_face(session=session, face_img=face_img)
 
     # =====================================================
-    # Verify (Fusion) - FACE + VOICE IDENTITY
+    # Verify (Fusion) - FACE + VOICE
     # =====================================================
 
     async def verify(

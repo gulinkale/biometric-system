@@ -8,100 +8,115 @@
   </head>
 
   <body data-page="enroll">
-    <div class="app-container enroll-layout">
+    <div class="app-container enroll-shell">
+      <!-- HERO -->
       <div class="card enroll-hero">
         <div class="section-head">
-          <h2>Enrollment (Admin)</h2>
-          <a class="back-link" href="/portal/login_portal.html">Back to Portal</a>
+          <div>
+            <h2>Biometric Enrollment</h2>
+            <p class="section-copy">
+              Complete your face and voice enrollment to activate biometric authentication for your portal account.
+            </p>
+          </div>
+
+          <a class="back-link" href="../portal/dashboard_portal.html">
+            Back to Dashboard
+          </a>
         </div>
 
-        <p class="section-copy">
-          This page is intended for enrollment only (hidden/admin). Access via URL.
+        <p class="session-text">
+          Enrolling account: <strong id="enrollUser">-</strong>
         </p>
       </div>
 
-      <!-- USER INFO -->
-      <div class="card enroll-sidebar">
-        <h2>User Info</h2>
-
-        <div class="field-grid">
-          <div class="field-group">
-            <label class="field-label">Username</label>
-            <input
-              class="text-input"
-              id="username"
-              placeholder="e.g. gulin.kale"
-            />
-          </div>
-
-          <div class="field-group">
-            <label class="field-label">Role</label>
-            <input
-              class="text-input"
-              id="role"
-              placeholder="e.g. student"
-            />
-          </div>
+      <!-- SINGLE STEP CARD -->
+      <div class="card enroll-main-card enroll-step-card">
+        <div class="enroll-step-header">
+          <p id="stepIndicator" class="step-indicator">Step 1 of 2</p>
+          <h2 id="stepTitle">Face Enrollment</h2>
+          <p id="stepDescription" class="section-copy">
+            Start the camera, then begin enrollment. The system will collect multiple face samples automatically.
+          </p>
         </div>
 
-        <p id="sessionText" class="session-text">Session: -</p>
-      </div>
+        <!-- STEP 1: FACE -->
+        <div id="faceStep">
+          <video
+            id="camVideo"
+            autoplay
+            playsinline
+            class="camera-frame"
+          ></video>
+          <canvas id="camCanvas" class="hidden"></canvas>
 
-      <!-- FACE ENROLL -->
-      <div class="card enroll-main-card">
-        <h2>Face Capture</h2>
-        <p class="section-copy">
-          Start camera, then start enrollment. Samples will be collected automatically.
-        </p>
-
-        <video
-          id="camVideo"
-          autoplay
-          playsinline
-          class="camera-frame"
-        ></video>
-        <canvas id="camCanvas" class="hidden"></canvas>
-
-        <div class="button-row compact-actions">
-          <button class="btn" id="btnStartCam" type="button">Start Camera</button>
-          <button class="btn" id="btnStopCam" type="button">Stop Camera</button>
-        </div>
-
-        <div class="progress-shell">
-          <div class="progress-head">
-            <span class="progress-label">Progress:</span>
-            <span id="progressText" class="progress-value">0/15</span>
+          <div class="button-row compact-actions">
+            <button class="btn" id="btnStartCam" type="button">Start Camera</button>
+            <button class="btn" id="btnStopCam" type="button">Stop Camera</button>
           </div>
 
-          <div class="progress-track">
-            <div id="progressBar" class="progress-bar"></div>
+          <div class="progress-shell">
+            <div class="progress-head">
+              <span class="progress-label">Progress:</span>
+              <span id="progressText" class="progress-value">0/15</span>
+            </div>
+
+            <div class="progress-track">
+              <div id="progressBar" class="progress-bar"></div>
+            </div>
+          </div>
+
+          <p id="statusText" class="status-line">Ready.</p>
+
+          <div class="button-row compact-actions">
+            <button class="btn" id="btnStartEnroll" type="button">Start Enrollment</button>
+            <button class="btn" id="btnStopEnroll" type="button">Stop</button>
+          </div>
+
+          <div class="button-row compact-actions">
+            <button class="btn" id="btnGoVoice" type="button">Continue to Voice</button>
           </div>
         </div>
 
-        <p id="statusText" class="status-line">Ready.</p>
+        <!-- STEP 2: VOICE -->
+        <div id="voiceStep" class="hidden">
+          <div class="voice-step-box">
+            <p class="section-copy">
+              Record a short voice sample and save it as your voice template.
+            </p>
 
-        <div class="button-row compact-actions">
-          <button class="btn" id="btnStartEnroll" type="button">Start Enrollment</button>
-          <button class="btn" id="btnStopEnroll" type="button">Stop</button>
+            <div class="button-row compact-actions">
+              <button class="btn" id="btnVoiceStart" type="button">Start Recording</button>
+              <button class="btn" id="btnVoiceStop" type="button">Stop Recording</button>
+              <button class="btn" id="btnVoiceEnroll" type="button">Enroll Voice</button>
+            </div>
+
+            <audio id="audioPreview" class="hidden audio-preview" controls></audio>
+
+            <p id="voiceStatus" class="status-line">Ready.</p>
+          </div>
+
+          <div class="button-row compact-actions">
+            <button class="btn" id="btnBackToFace" type="button">Back to Face</button>
+            <button class="btn" id="btnGoComplete" type="button">Finish Enrollment</button>
+          </div>
         </div>
-      </div>
 
-      <!-- VOICE ENROLL -->
-      <div class="card enroll-main-card">
-        <h2>Voice Enrollment</h2>
-        <p class="section-copy">
-          After face enrollment, record a 3–5 second voice sample and save it as the user's voice template.
-        </p>
+        <!-- STEP 3: COMPLETE -->
+        <div id="completeStep" class="hidden">
+          <div class="complete-box">
+            <h3>Enrollment Completed</h3>
+            <p class="section-copy">
+              Your biometric enrollment steps have been completed. You can now return to the dashboard or continue to identity verification.
+            </p>
 
-        <div class="button-row compact-actions">
-          <button class="btn" id="btnVoiceStart" type="button">Start Recording</button>
-          <button class="btn" id="btnVoiceStop" type="button">Stop Recording</button>
-          <button class="btn" id="btnVoiceEnroll" type="button">Enroll Voice</button>
+            <p id="completeStatus" class="status-line">Ready.</p>
+          </div>
+
+          <div class="button-row compact-actions">
+            <a class="btn back-link-btn" href="../portal/dashboard_portal.html">Back to Dashboard</a>
+            <a class="btn back-link-btn" href="../biometric/identify.html">Go to Verification</a>
+          </div>
         </div>
-
-        <audio id="audioPreview" class="hidden audio-preview" controls></audio>
-
-        <p id="voiceStatus" class="status-line">Ready.</p>
       </div>
     </div>
 

@@ -9,8 +9,20 @@ import {
 import { startVoiceRecording, stopVoiceRecordingToBase64 } from "./voice.js";
 
 export function initEnroll() {
-  const usernameEl = byId("username");
-  const roleEl = byId("role");
+  const enrollUserEl = byId("enrollUser");
+
+  const faceStepEl = byId("faceStep");
+  const voiceStepEl = byId("voiceStep");
+  const completeStepEl = byId("completeStep");
+
+  const stepIndicatorEl = byId("stepIndicator");
+  const stepTitleEl = byId("stepTitle");
+  const stepDescriptionEl = byId("stepDescription");
+
+  const btnGoVoice = byId("btnGoVoice");
+  const btnBackToFace = byId("btnBackToFace");
+  const btnGoComplete = byId("btnGoComplete");
+  const completeStatusEl = byId("completeStatus");
 
   const videoEl = byId("camVideo");
   const canvasEl = byId("camCanvas");
@@ -20,7 +32,6 @@ export function initEnroll() {
   const btnStartEnroll = byId("btnStartEnroll");
   const btnStopEnroll = byId("btnStopEnroll");
 
-  const sessionTextEl = byId("sessionText");
   const progressTextEl = byId("progressText");
   const progressBarEl = byId("progressBar");
   const statusTextEl = byId("statusText");
@@ -31,6 +42,32 @@ export function initEnroll() {
   const audioPreview = byId("audioPreview");
   const voiceStatusEl = byId("voiceStatus");
 
+  const query = new URLSearchParams(window.location.search);
+  const storageUsername = (localStorage.getItem("portalUsername") || "").trim();
+  const storageRole = (localStorage.getItem("portalRole") || "").trim();
+  const queryUsername = (query.get("username") || "").trim();
+  const queryRole = (query.get("role") || "").trim();
+
+  const username = storageUsername || queryUsername;
+  const role = storageRole || queryRole || "user";
+  const isLoggedIn = localStorage.getItem("portalLoggedIn") === "true";
+
+  if (enrollUserEl) {
+    enrollUserEl.textContent = username ? username : "Not signed in";
+  }
+
+  if (!storageUsername && queryUsername) {
+    localStorage.setItem("portalUsername", queryUsername);
+  }
+  if (!storageRole && queryRole) {
+    localStorage.setItem("portalRole", queryRole);
+  }
+
+  if ((!isLoggedIn && !queryUsername) || !username) {
+    window.location.href = "../portal/office_login.html";
+    return;
+  }
+
   let sessionId = null;
   let isCapturing = false;
   let captureTimer = null;
@@ -38,6 +75,8 @@ export function initEnroll() {
   let targetSamples = 15;
   let acceptedSamples = 0;
   let voiceB64 = null;
+  let faceEnrollmentCompleted = false;
+  let voiceEnrollmentCompleted = false;
 
   function setStatus(msg) {
     setText(statusTextEl, msg);
@@ -49,11 +88,6 @@ export function initEnroll() {
     console.log("[VOICE]", msg);
   }
 
-  function setSession(id) {
-    sessionId = id;
-    setText(sessionTextEl, id ? `Session: ${id}` : "Session: -");
-  }
-
   function setProgress(count, target) {
     acceptedSamples = count;
     targetSamples = target;
@@ -61,8 +95,62 @@ export function initEnroll() {
     setText(progressTextEl, `${count}/${target}`);
 
     if (progressBarEl) {
-      const pct = target > 0 ? Math.min(100, Math.round((count / target) * 100)) : 0;
+      const pct =
+        target > 0 ? Math.min(100, Math.round((count / target) * 100)) : 0;
       progressBarEl.style.width = `${pct}%`;
+    }
+  }
+
+  function showFaceStep() {
+    faceStepEl?.classList.remove("hidden");
+    voiceStepEl?.classList.add("hidden");
+    completeStepEl?.classList.add("hidden");
+
+    setText(stepIndicatorEl, "Step 1 of 2");
+    setText(stepTitleEl, "Face Enrollment");
+    setText(
+      stepDescriptionEl,
+      "Start the camera, then begin enrollment. The system will collect multiple face samples automatically."
+    );
+  }
+
+  function showVoiceStep() {
+    faceStepEl?.classList.add("hidden");
+    voiceStepEl?.classList.remove("hidden");
+    completeStepEl?.classList.add("hidden");
+
+    setText(stepIndicatorEl, "Step 2 of 2");
+    setText(stepTitleEl, "Voice Enrollment");
+    setText(
+      stepDescriptionEl,
+      "Record a short voice sample and save it as your voice template."
+    );
+  }
+
+  function showCompleteStep() {
+    faceStepEl?.classList.add("hidden");
+    voiceStepEl?.classList.add("hidden");
+    completeStepEl?.classList.remove("hidden");
+
+    setText(stepIndicatorEl, "Completed");
+    setText(stepTitleEl, "Enrollment Completed");
+    setText(
+      stepDescriptionEl,
+      "Your face and voice enrollment steps have been completed successfully."
+    );
+    setText(
+      completeStatusEl,
+      "Biometric enrollment completed successfully."
+    );
+  }
+
+  function updateStepButtons() {
+    if (btnGoVoice) {
+      btnGoVoice.disabled = !faceEnrollmentCompleted;
+    }
+
+    if (btnGoComplete) {
+      btnGoComplete.disabled = !voiceEnrollmentCompleted;
     }
   }
 
@@ -82,8 +170,33 @@ export function initEnroll() {
     if (doFinish && sessionId) {
       try {
         const result = await apiFinishEnroll(sessionId);
+        console.log("[FACE FINISH STATUS]", result?.status);
+
         const nSamples = result?.n_samples ?? acceptedSamples;
         setStatus(`Saved: ${result?.status || "OK"} (samples: ${nSamples})`);
+
+        const status = (result?.status || "").toUpperCase();
+
+        if (
+          status === "ENROLLED" ||
+          status === "FACE_UPDATED" ||
+          status === "FACE_ALREADY_REGISTERED"
+        ) {
+          faceEnrollmentCompleted = true;
+          console.log("[DEBUG] faceEnrollmentCompleted set to true");
+          console.log("[DEBUG] btnGoVoice element:", btnGoVoice);
+          console.log("[DEBUG] btnGoVoice.disabled before update:", btnGoVoice?.disabled);
+          
+          updateStepButtons();
+          
+          console.log("[DEBUG] btnGoVoice.disabled after update:", btnGoVoice?.disabled);
+          setStatus(`Face enrollment complete. Click 'Continue to Voice' to proceed.`);
+          
+          // Otomatik voice adımına geç
+          setTimeout(() => {
+            showVoiceStep();
+          }, 500);
+        }
       } catch (e) {
         console.error(e);
         setStatus(`Finish error: ${e.message || "UNKNOWN_ERROR"}`);
@@ -112,19 +225,6 @@ export function initEnroll() {
   btnStartEnroll?.addEventListener("click", async () => {
     if (isCapturing) return;
 
-    const username = (usernameEl?.value || "").trim();
-    const role = (roleEl?.value || "").trim();
-
-    if (!username) {
-      setStatus("Username is required.");
-      return;
-    }
-
-    if (!role) {
-      setStatus("Role is required.");
-      return;
-    }
-
     const hasCamera = !!videoEl?.srcObject;
     if (!hasCamera) {
       setStatus("Start camera first.");
@@ -134,10 +234,10 @@ export function initEnroll() {
     try {
       setStatus("Starting enrollment...");
       setProgress(0, 15);
-      setSession(null);
+      sessionId = null;
 
       const startRes = await apiStartEnroll(username, role);
-      setSession(startRes?.session_id || null);
+      sessionId = startRes?.session_id || null;
       setProgress(0, startRes?.target || 15);
 
       isCapturing = true;
@@ -165,7 +265,8 @@ export function initEnroll() {
 
           const reached =
             r?.reason === "TARGET_REACHED" ||
-            ((r?.count ?? 0) >= (r?.target ?? targetSamples) && (r?.target ?? targetSamples) > 0);
+            ((r?.count ?? 0) >= (r?.target ?? targetSamples) &&
+              (r?.target ?? targetSamples) > 0);
 
           if (reached) {
             setStatus("Target reached. Saving...");
@@ -235,19 +336,6 @@ export function initEnroll() {
 
   btnVoiceEnroll?.addEventListener("click", async () => {
     try {
-      const username = (usernameEl?.value || "").trim();
-      const role = (roleEl?.value || "").trim();
-
-      if (!username) {
-        setVoiceStatus("Username is required.");
-        return;
-      }
-
-      if (!role) {
-        setVoiceStatus("Role is required.");
-        return;
-      }
-
       if (!voiceB64) {
         setVoiceStatus("Record voice first.");
         return;
@@ -257,7 +345,22 @@ export function initEnroll() {
       setVoiceStatus("Saving voice template...");
 
       const res = await apiEnrollVoice(username, role, voiceB64);
-      setVoiceStatus(res?.status ? `Voice enrolled: ${res.status}` : "Voice enrolled.");
+      console.log("[VOICE ENROLL STATUS]", res?.status);
+      setVoiceStatus(
+        res?.status ? `Voice enrolled: ${res.status}` : "Voice enrolled."
+      );
+
+      const status = (res?.status || "").toUpperCase();
+
+      if (
+        status === "VOICE_ENROLLED" ||
+        status === "VOICE_UPDATED" ||
+        status === "VOICE_ALREADY_REGISTERED"
+      ) {
+        voiceEnrollmentCompleted = true;
+        updateStepButtons();
+        setVoiceStatus("Voice enrollment complete. Click 'Finish Enrollment' to complete.");
+      }
     } catch (e) {
       console.error(e);
       setVoiceStatus(`Voice enroll failed: ${e.message || "UNKNOWN_ERROR"}`);
@@ -266,11 +369,35 @@ export function initEnroll() {
     }
   });
 
-  setSession(null);
+  btnGoVoice?.addEventListener("click", () => {
+    if (!faceEnrollmentCompleted) {
+      setStatus("Complete face enrollment first.");
+      return;
+    }
+    showVoiceStep();
+  });
+
+  btnBackToFace?.addEventListener("click", () => {
+    showFaceStep();
+  });
+
+  btnGoComplete?.addEventListener("click", () => {
+    if (!voiceEnrollmentCompleted) {
+      setVoiceStatus("Complete voice enrollment first.");
+      return;
+    }
+    showCompleteStep();
+  });
+
   setProgress(0, targetSamples);
   setStatus("Ready.");
   setVoiceStatus("Ready.");
 
   if (btnStopEnroll) btnStopEnroll.disabled = true;
   if (btnVoiceStop) btnVoiceStop.disabled = true;
+
+  faceEnrollmentCompleted = false;
+  voiceEnrollmentCompleted = false;
+  updateStepButtons();
+  showFaceStep();
 }

@@ -1,15 +1,24 @@
 import { trackPrevPage } from "./navigation.js";
-import { initEnroll } from "./enroll.js";
-import { initIdentify } from "./identify.js";
 
 trackPrevPage();
 
 const page = document.body.dataset.page;
 
-if (page === "enroll") {
-  initEnroll();
+async function boot() {
+  try {
+    if (page === "enroll") {
+      const mod = await import("./enroll.js");
+      mod.initEnroll();
+      return;
+    }
+
+    if (page === "identify") {
+      const mod = await import("./identify.js");
+      mod.initIdentify();
+    }
+  } catch (err) {
+    console.error("[BOOT ERROR]", err);
+  }
 }
 
-if (page === "identify") {
-  initIdentify();
-}
+boot();

@@ -8,7 +8,6 @@ class VerifyRequest(BaseModel):
     face_image_b64: Optional[str] = None
     voice_wav_b64: Optional[str] = None
 
-    # boş string -> None
     @field_validator("face_image_b64", "voice_wav_b64", mode="before")
     @classmethod
     def empty_str_to_none(cls, v):
@@ -18,7 +17,6 @@ class VerifyRequest(BaseModel):
             return None
         return v
 
-    # en az bir modalite zorunlu
     @model_validator(mode="after")
     def at_least_one_modality(self):
         if not self.face_image_b64 and not self.voice_wav_b64:
@@ -33,3 +31,59 @@ class VerifyResponse(BaseModel):
     fusion_score: float
     face_score: float
     voice_score: float
+
+
+class CreateUserRequest(BaseModel):
+    username: str
+    password: str
+    role: str = "user"
+
+    @field_validator("username", "password", "role", mode="before")
+    @classmethod
+    def strip_string_fields(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+    @model_validator(mode="after")
+    def validate_fields(self):
+        if not self.username:
+            raise ValueError("Username is required.")
+        if not self.password:
+            raise ValueError("Password is required.")
+        if self.role not in {"admin", "user"}:
+            raise ValueError("Role must be either 'admin' or 'user'.")
+        return self
+
+
+class CreateUserResponse(BaseModel):
+    message: str
+    user_id: int
+    username: str
+    role: str
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+    @field_validator("username", "password", mode="before")
+    @classmethod
+    def strip_login_fields(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+    @model_validator(mode="after")
+    def validate_login_fields(self):
+        if not self.username:
+            raise ValueError("Username is required.")
+        if not self.password:
+            raise ValueError("Password is required.")
+        return self
+
+
+class LoginResponse(BaseModel):
+    message: str
+    username: str
+    role: str

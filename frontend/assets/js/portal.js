@@ -5,11 +5,91 @@ window.portal = {
     console.log("[PORTAL] init");
 
     const biometricBtn = document.getElementById("btn-biometric-login");
+    const loginForm = document.getElementById("portalLoginForm");
+    const signInBtn = document.getElementById("btnSignIn");
+    const usernameInput = document.getElementById("username");
+    const passwordInput = document.getElementById("password");
+    const loginMessage = document.getElementById("loginMessage");
 
     if (biometricBtn) {
       biometricBtn.addEventListener("click", (e) => {
         e.preventDefault();
         window.location.href = "../biometric/identify.html";
+      });
+    }
+
+    async function handleLogin() {
+      console.log("[PORTAL] login handler triggered");
+
+      const username = usernameInput ? usernameInput.value.trim() : "";
+      const password = passwordInput ? passwordInput.value.trim() : "";
+
+      console.log("[PORTAL] username:", username);
+
+      if (!username || !password) {
+        if (loginMessage) {
+          loginMessage.textContent = "Please enter username and password.";
+        }
+        return;
+      }
+
+      try {
+        const response = await fetch("http://127.0.0.1:8000/auth/login", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            username,
+            password,
+          }),
+        });
+
+        console.log("[PORTAL] response status:", response.status);
+
+        const data = await response.json();
+        console.log("[PORTAL] response data:", data);
+
+        if (!response.ok) {
+          if (loginMessage) {
+            loginMessage.textContent = data.detail || "Login failed.";
+          }
+          return;
+        }
+
+        if (loginMessage) {
+          loginMessage.textContent = "Login successful. Redirecting...";
+        }
+
+        localStorage.setItem("portalUsername", data.username);
+        localStorage.setItem("portalRole", data.role);
+        localStorage.setItem("portalLoggedIn", "true");
+
+        setTimeout(() => {
+          window.location.href = "../portal/dashboard_portal.html";
+        }, 600);
+      } catch (error) {
+        console.error("[PORTAL LOGIN ERROR]", error);
+        if (loginMessage) {
+          loginMessage.textContent = "Could not connect to the server.";
+        }
+      }
+    }
+
+    if (loginForm) {
+      console.log("[PORTAL] login form found");
+
+      loginForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        await handleLogin();
+      });
+    }
+
+    if (signInBtn) {
+      console.log("[PORTAL] sign-in button found");
+
+      signInBtn.addEventListener("click", async () => {
+        await handleLogin();
       });
     }
   },

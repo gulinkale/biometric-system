@@ -5,23 +5,21 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.api.routes_auth import router as auth_router
-from app.db.session import engine
-from app.db.models import Base
-from fastapi import APIRouter
 from app.api.routes_enrollment import router as enroll_router
 from app.api.routes_identify import router as identify_router
+from app.api.routes_admin import router as admin_router
+from app.db.session import engine
+from app.db.models import Base
 
 
 app = FastAPI(title=settings.APP_NAME)
 
-#routers
+# routers
 app.include_router(auth_router)
 app.include_router(enroll_router)
 app.include_router(identify_router)
+app.include_router(admin_router)
 
-
-# If your UI runs on a different port/domain, enable CORS.
-# You can tighten this later (e.g., only your UI origin).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -32,6 +30,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 @app.get("/health")
 async def health():
@@ -46,6 +45,4 @@ async def on_startup():
 
 @app.on_event("shutdown")
 async def on_shutdown():
-    # Place graceful cleanup here if you add global resources later.
-    # (Right now, nothing global to close.)
     pass
