@@ -166,7 +166,7 @@ export async function stopVoiceRecording() {
   }
 
   // çok kısa kayıtları engelle
-  const minSamples = sampleRate * 1.0; // en az 1 saniye
+  const minSamples = sampleRate * 0.8; // en az 0.8 saniye
   if (merged.length < minSamples) {
     throw new Error("RECORDING_TOO_SHORT");
   }

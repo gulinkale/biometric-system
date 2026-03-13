@@ -16,6 +16,7 @@
       <p class="muted" style="margin:2px 0;">Status: <span id="flowDebugStatus">-</span></p>
       <p class="muted" style="margin:2px 0;">Reason: <span id="flowDebugReason">-</span></p>
       <p class="muted" style="margin:2px 0;">Score: <span id="flowDebugScore">-</span></p>
+      <div id="flowDebugHistory" class="muted" style="margin-top:8px; font-size:0.78rem; line-height:1.35; max-height:110px; overflow:auto;"></div>
     </div>
 
     <!-- STEP 1: FACE -->
@@ -54,9 +55,20 @@
       <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:10px;">
         <button class="btn" id="btnCheckTurnRight" type="button">Check RIGHT turn</button>
         <button class="btn" id="btnCheckTurnLeft" type="button">Check LEFT turn</button>
+        <button class="btn" id="btnCheckBlink" type="button">Check BLINK</button>
       </div>
 
       <p id="livenessStatus" class="muted" style="margin-top:10px;"></p>
+
+      <!-- Voice verify score box (shown on failure) -->
+      <div id="voiceVerifyScoreBox" style="display:none; background:#1a2e45; border:1px solid #3a6ea5; border-radius:6px; padding:9px 14px; margin-top:10px; font-size:0.87rem; line-height:1.7;">
+        <p style="margin:0; color:#f0a500; font-weight:600;">&#x26A0; Ses Dogrulama Basarisiz</p>
+        <p style="margin:2px 0; color:#aac8e8;">Yuz skoru: <strong id="vvFaceScore">-</strong></p>
+        <p style="margin:2px 0; color:#aac8e8;">Ses kimlik skoru: <strong id="vvVoiceScore">-</strong> &nbsp;/&nbsp; <span style="color:#f0a500;">esik: 0.88</span></p>
+        <p style="margin:2px 0; color:#aac8e8;">Fusion skoru: <strong id="vvFusionScore">-</strong></p>
+        <p style="margin:2px 0; color:#aac8e8;">Sebep: <strong id="vvReason">-</strong></p>
+      </div>
+
       <button class="btn" id="btnLivenessContinue" type="button" disabled>Complete Verification</button>
     </div>
 

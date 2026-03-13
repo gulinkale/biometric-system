@@ -61,12 +61,14 @@ export function apiFinishEnroll(session_id) {
 // -------------------------
 // ENROLL (VOICE - identity template)
 // -------------------------
-export function apiGetVoiceChallenge(excludeIds = []) {
+export function apiGetVoiceChallenge(username, excludeIds = []) {
   const query = excludeIds.length
-    ? `?${excludeIds.map((id) => `exclude_ids=${encodeURIComponent(id)}`).join("&")}`
+    ? `${excludeIds.map((id) => `exclude_ids=${encodeURIComponent(id)}`).join("&")}`
     : "";
+  const usernameQuery = `username=${encodeURIComponent(username || "")}`;
+  const finalQuery = query ? `?${usernameQuery}&${query}` : `?${usernameQuery}`;
 
-  return jsonFetch(`/enroll/voice/challenge${query}`, {
+  return jsonFetch(`/enroll/voice/challenge${finalQuery}`, {
     method: "GET",
   });
 }
@@ -125,11 +127,38 @@ export function apiValidateIdentifyVoiceChallenge(challenge_id, answer_text) {
   });
 }
 
-export function apiIdentifyPoseCheck(face_image_b64, required_turn) {
+export function apiIdentifyPoseCheck(
+  face_image_b64,
+  required_turn,
+  reference_face_image_b64 = null,
+  expected_user_id = null
+) {
   return jsonFetch("/identify/pose-check", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ face_image_b64, required_turn }),
+    body: JSON.stringify({
+      face_image_b64,
+      required_turn,
+      reference_face_image_b64,
+      expected_user_id,
+      require_eyes_open: true,
+    }),
+  });
+}
+
+export function apiIdentifyBlinkCheck(
+  face_frames_b64,
+  reference_face_image_b64 = null,
+  expected_user_id = null
+) {
+  return jsonFetch("/identify/blink-check", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      face_frames_b64,
+      reference_face_image_b64,
+      expected_user_id,
+    }),
   });
 }
 

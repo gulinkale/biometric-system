@@ -10,7 +10,6 @@ import {
 import {
   startVoiceRecording,
   stopVoiceRecordingToBase64,
-  recognizeSpeechOnce,
 } from "./voice.js";
 
 export function initEnroll() {
@@ -88,6 +87,7 @@ export function initEnroll() {
   let voiceListening = false;
   let faceEnrollmentCompleted = false;
   let voiceEnrollmentCompleted = false;
+  const VOICE_TARGET_SAMPLES = 5;
 
   function setStatus(msg) {
     setText(statusTextEl, msg);
@@ -122,18 +122,160 @@ export function initEnroll() {
   }
 
   function updateVoiceSampleProgress() {
-    const current = Math.min(voiceSamples.length + 1, 3);
-    setText(voiceSampleProgressEl, `Saved ${voiceSamples.length}/3 samples. Current prompt ${current}/3`);
+    const current = Math.min(voiceSamples.length + 1, VOICE_TARGET_SAMPLES);
+    setText(
+      voiceSampleProgressEl,
+      `Saved ${voiceSamples.length}/${VOICE_TARGET_SAMPLES} samples. Current prompt ${current}/${VOICE_TARGET_SAMPLES}`
+    );
   }
 
   function resetCurrentVoiceCapture() {
     voiceB64 = null;
-    setText(voiceTranscriptPreviewEl, "Waiting for answer...");
+    setText(voiceTranscriptPreviewEl, "Waiting for phrase...");
     if (audioPreview) {
       audioPreview.pause?.();
       audioPreview.src = "";
       audioPreview.classList.add("hidden");
     }
+    if (btnVoiceStart) btnVoiceStart.disabled = false;
+  }
+
+  function normalizeText(value) {
+    return String(value || "")
+      .toLowerCase()
+      .replace(/[ı]/g, "i")
+      .replace(/[ş]/g, "s")
+      .replace(/[ç]/g, "c")
+      .replace(/[ö]/g, "o")
+      .replace(/[ü]/g, "u")
+      .replace(/[ğ]/g, "g")
+      .replace(/[^a-z0-9 ]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function extractSpeakTarget(promptText) {
+    const raw = String(promptText || "").trim();
+    if (!raw) return "";
+    const idx = raw.indexOf(":");
+    if (idx >= 0 && idx < raw.length - 1) {
+      return raw.slice(idx + 1).trim();
+    }
+    return raw;
+  }
+
+  function phraseMatchScore(expectedText, spokenText) {
+    const expected = normalizeText(expectedText);
+    const spoken = normalizeText(spokenText);
+    if (!expected || !spoken) {
+      return { score: 0, hitCount: 0, expectedCount: 0, charRatio: 0 };
+    }
+
+    const expectedWords = expected.split(" ").filter(Boolean);
+    const expectedCount = expectedWords.length;
+    if (!expectedCount) {
+      return { score: 0, hitCount: 0, expectedCount: 0, charRatio: 0 };
+    }
+
+    let hit = 0;
+    for (const w of expectedWords) {
+      if (spoken.includes(w)) hit += 1;
+    }
+
+    // Spoken length must also be close to expected length to avoid early partial matches.
+    const charRatio = Math.min(1, spoken.length / Math.max(expected.length, 1));
+
+    let score = hit / expectedCount;
+    if (spoken.includes(expected)) {
+      score = 1.0;
+    }
+
+    return { score, hitCount: hit, expectedCount, charRatio };
+  }
+
+  async function recognizePhraseUntilMatch(expectedText, { lang = "tr-TR", timeoutMs = 10000 } = {}) {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      throw new Error("SPEECH_RECOGNITION_UNSUPPORTED");
+    }
+
+    return new Promise((resolve, reject) => {
+      const recognition = new SpeechRecognition();
+      let done = false;
+      let bestTranscript = "";
+      let bestScore = 0;
+      let pendingFinalizeTimer = null;
+
+      const finish = (fn, value) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        if (pendingFinalizeTimer) {
+          clearTimeout(pendingFinalizeTimer);
+          pendingFinalizeTimer = null;
+        }
+        try {
+          recognition.stop();
+        } catch {}
+        fn(value);
+      };
+
+      recognition.lang = lang;
+      recognition.interimResults = true;
+      recognition.continuous = true;
+      recognition.maxAlternatives = 1;
+
+      recognition.onresult = (event) => {
+        let transcript = "";
+        for (let i = 0; i < event.results.length; i += 1) {
+          transcript += `${event.results[i][0]?.transcript || ""} `;
+        }
+        transcript = transcript.trim();
+        if (!transcript) return;
+
+        const match = phraseMatchScore(expectedText, transcript);
+        if (match.score > bestScore) {
+          bestScore = match.score;
+          bestTranscript = transcript;
+          setText(voiceTranscriptPreviewEl, transcript);
+        }
+
+        const latest = event.results[event.resultIndex];
+        const isFinal = !!latest?.isFinal;
+
+        // Auto-complete only on final ASR segments and near-complete sentence coverage.
+        const enoughWords = match.expectedCount > 0 && match.hitCount >= Math.max(2, match.expectedCount - 2);
+        const enoughLength = match.charRatio >= 0.75;
+        const strongScore = match.score >= 0.70;
+
+        if (pendingFinalizeTimer) {
+          clearTimeout(pendingFinalizeTimer);
+          pendingFinalizeTimer = null;
+        }
+
+        if (isFinal && strongScore && enoughWords && enoughLength) {
+          // Small grace delay to avoid early cut-offs right after finalization.
+          pendingFinalizeTimer = setTimeout(() => {
+            finish(resolve, { transcript, score: match.score });
+          }, 700);
+        }
+      };
+
+      recognition.onerror = (event) => {
+        const code = event?.error ? `SPEECH_${String(event.error).toUpperCase()}` : "SPEECH_ERROR";
+        finish(reject, new Error(code));
+      };
+
+      const timer = setTimeout(() => {
+        if (bestScore >= 0.70 && bestTranscript) {
+          finish(resolve, { transcript: bestTranscript, score: bestScore });
+          return;
+        }
+        finish(reject, new Error("PHRASE_NOT_MATCHED"));
+      }, timeoutMs);
+
+      recognition.start();
+    });
   }
 
   function setProgress(count, target) {
@@ -171,7 +313,7 @@ export function initEnroll() {
     setText(stepTitleEl, "Voice Enrollment");
     setText(
       stepDescriptionEl,
-      "Speak the shown prompt, stop recording, type the short answer you said, then save the sample. After 3 samples voice enrollment completes automatically."
+      `Read the shown sentence clearly. After ${VOICE_TARGET_SAMPLES} samples voice enrollment completes automatically.`
     );
 
     if (!voiceChallengeId) {
@@ -183,17 +325,16 @@ export function initEnroll() {
   async function loadVoiceChallenge() {
     try {
       const usedIds = voiceSamples.map((sample) => sample.challenge_id);
-      const challenge = await apiGetVoiceChallenge(usedIds);
+      const challenge = await apiGetVoiceChallenge(username, usedIds);
       voiceChallengeId = challenge?.challenge_id || null;
       setText(
         voiceChallengePromptEl,
-        challenge?.prompt || "Please answer the displayed challenge question."
+        challenge?.prompt || "Please read the displayed sentence clearly."
       );
       resetCurrentVoiceCapture();
-      if (btnVoiceStart) btnVoiceStart.disabled = false;
     } catch (e) {
       console.error(e);
-      setText(voiceChallengePromptEl, "Challenge question unavailable.");
+      setText(voiceChallengePromptEl, "Okunacak metin alinamadi.");
       voiceChallengeId = null;
     }
   }
@@ -251,6 +392,7 @@ export function initEnroll() {
         // sample geldiyse veya backend olumlu bir status döndüyse tamam kabul et
         if (
           nSamples > 0 ||
+          status === "FACE_STAGED" ||
           status === "ENROLLED" ||
           status === "FACE_UPDATED" ||
           status === "FACE_ALREADY_REGISTERED"
@@ -368,21 +510,37 @@ export function initEnroll() {
   });
 
   btnVoiceStart?.addEventListener("click", async () => {
+    const minRecordMs = 2200;
     try {
-      voiceB64 = null;
       if (voiceListening) return;
-      voiceListening = true;
-      if (btnVoiceStart) btnVoiceStart.disabled = true;
-      const startedAt = Date.now();
-      const minRecordMs = 2500;
+      if (!voiceChallengeId) {
+        setVoiceStatus("Metin hazir degil. Lutfen tekrar deneyin.");
+        return;
+      }
+      if (voiceSamples.length >= VOICE_TARGET_SAMPLES) {
+        setVoiceStatus(`Already collected ${VOICE_TARGET_SAMPLES} samples.`);
+        return;
+      }
 
-      setVoiceStatus("Listening... Answer the prompt naturally. When your answer is heard, the next question will load automatically.");
+      voiceB64 = null;
+      const voiceRecordStartedAt = Date.now();
+      const promptText = (voiceChallengePromptEl?.textContent || "").trim();
+      const expectedPhrase = extractSpeakTarget(promptText);
+      if (btnVoiceStart) btnVoiceStart.disabled = true;
+
+      setVoiceStatus("Recording started. Metni okuyun; cumle algilaninca otomatik kaydedilecek.");
       await startVoiceRecording();
-      const transcript = await recognizeSpeechOnce({ lang: "tr-TR", timeoutMs: 9000 });
-      const elapsed = Date.now() - startedAt;
+
+      const speech = await recognizePhraseUntilMatch(expectedPhrase, {
+        lang: "tr-TR",
+        timeoutMs: 11000,
+      });
+
+      const elapsed = Date.now() - voiceRecordStartedAt;
       if (elapsed < minRecordMs) {
         await sleep(minRecordMs - elapsed);
       }
+
       const { blob, b64 } = await stopVoiceRecordingToBase64();
       voiceB64 = b64;
 
@@ -391,56 +549,50 @@ export function initEnroll() {
         audioPreview.classList.remove("hidden");
       }
 
-      setText(voiceTranscriptPreviewEl, transcript);
-      setVoiceStatus("Answer heard. Saving sample...");
+      setText(voiceTranscriptPreviewEl, speech?.transcript || expectedPhrase || "Recorded phrase.");
+      setVoiceStatus("Voice sample captured. Saving sample...");
 
-      if (!voiceChallengeId) {
-        throw new Error("Challenge question not ready.");
-      }
-      if (voiceSamples.length >= 3) {
-        setVoiceStatus("Already collected 3 samples.");
+      if (voiceSamples.length >= VOICE_TARGET_SAMPLES) {
+        setVoiceStatus(`Already collected ${VOICE_TARGET_SAMPLES} samples.`);
+        if (btnVoiceStart) btnVoiceStart.disabled = true;
         return;
       }
 
       voiceSamples.push({
         voice_wav_b64: voiceB64,
         challenge_id: voiceChallengeId,
-        challenge_answer_text: transcript,
+        challenge_answer_text: expectedPhrase,
       });
 
-      setVoiceStatus(`Sample ${voiceSamples.length}/3 saved.`);
+      setVoiceStatus(`Sample ${voiceSamples.length}/${VOICE_TARGET_SAMPLES} saved.`);
       updateVoiceSampleProgress();
 
-      if (voiceSamples.length < 3) {
+      if (voiceSamples.length < VOICE_TARGET_SAMPLES) {
         await loadVoiceChallenge();
-        setVoiceStatus(`Sample ${voiceSamples.length}/3 saved. Next prompt loaded automatically.`);
+        setVoiceStatus(
+          `Sample ${voiceSamples.length}/${VOICE_TARGET_SAMPLES} saved. Sonraki cumle otomatik yüklendi.`
+        );
         return;
       }
 
       if (btnVoiceStart) btnVoiceStart.disabled = true;
-      setText(voiceChallengePromptEl, "3 samples captured. Finalizing voice enrollment...");
-      setVoiceStatus("Saving merged voice template from 3 samples...");
-
-      const res = await apiEnrollVoiceBatch(
-        username,
-        role,
-        voiceSamples
+      setText(
+        voiceChallengePromptEl,
+        `${VOICE_TARGET_SAMPLES} samples captured. Finalizing voice enrollment...`
       );
+      setVoiceStatus(`Saving merged voice template from ${VOICE_TARGET_SAMPLES} samples...`);
+
+      const res = await apiEnrollVoiceBatch(username, role, voiceSamples);
       console.log("[VOICE ENROLL STATUS]", res?.status, res?.reason || "");
 
       if ((res?.status || "").toUpperCase() === "FAILED") {
         const detail = res?.detail ? ` (${JSON.stringify(res.detail)})` : "";
-        setVoiceStatus(
-          `Voice enroll failed: ${res?.reason || "UNKNOWN_ERROR"}${detail}`
-        );
+        setVoiceStatus(`Voice enroll failed: ${res?.reason || "UNKNOWN_ERROR"}${detail}`);
       } else {
-        setVoiceStatus(
-          res?.status ? `Voice enrolled: ${res.status}` : "Voice enrolled."
-        );
+        setVoiceStatus(res?.status ? `Voice enrolled: ${res.status}` : "Voice enrolled.");
       }
 
       const status = (res?.status || "").toUpperCase();
-
       if (
         status === "VOICE_ENROLLED" ||
         status === "VOICE_UPDATED" ||
@@ -449,16 +601,23 @@ export function initEnroll() {
         voiceEnrollmentCompleted = true;
         updateStepButtons();
         setVoiceStatus("Voice enrollment complete. Click 'Finish Enrollment' to complete.");
-        setText(voiceSampleProgressEl, "Saved 3/3 samples. Voice enrollment completed.");
+        setText(
+          voiceSampleProgressEl,
+          `Saved ${VOICE_TARGET_SAMPLES}/${VOICE_TARGET_SAMPLES} samples. Voice enrollment completed.`
+        );
       }
     } catch (e) {
       console.error(e);
       try {
-        if (voiceListening) {
-          await stopVoiceRecordingToBase64();
-        }
+        await stopVoiceRecordingToBase64();
       } catch {}
-      setVoiceStatus(`Voice enroll failed: ${e.message || "UNKNOWN_ERROR"}`);
+
+      const errCode = String(e?.message || "").toUpperCase();
+      if (errCode === "PHRASE_NOT_MATCHED" || errCode.startsWith("SPEECH_")) {
+        setVoiceStatus("Cumle tam algilanamadi. Metni net okuyup tekrar deneyin.");
+      } else {
+        setVoiceStatus(`Voice enroll failed: ${e.message || "UNKNOWN_ERROR"}`);
+      }
       if (btnVoiceStart) btnVoiceStart.disabled = false;
     } finally {
       voiceListening = false;
@@ -466,18 +625,19 @@ export function initEnroll() {
   });
 
   btnGoVoice?.addEventListener("click", () => {
-    console.log("[GO VOICE CLICKED]");
-    console.log("[FACE COMPLETED STATE]", faceEnrollmentCompleted);
-
     if (!faceEnrollmentCompleted) {
       setStatus("Complete face enrollment first.");
       return;
     }
-
     showVoiceStep();
   });
 
   btnBackToFace?.addEventListener("click", () => {
+    if (voiceListening) {
+      stopVoiceRecordingToBase64().catch(() => {});
+      voiceListening = false;
+      if (btnVoiceStart) btnVoiceStart.disabled = false;
+    }
     showFaceStep();
   });
 
@@ -492,7 +652,7 @@ export function initEnroll() {
   setProgress(0, targetSamples);
   setAngleStatus("center", { center: 0, left: 0, right: 0 });
   updateVoiceSampleProgress();
-  setText(voiceTranscriptPreviewEl, "Waiting for answer...");
+  setText(voiceTranscriptPreviewEl, "Waiting for phrase...");
   setStatus("Ready.");
   setVoiceStatus("Ready.");
 
