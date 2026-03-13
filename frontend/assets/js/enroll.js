@@ -4,9 +4,14 @@ import {
   apiStartEnroll,
   apiPushFrame,
   apiFinishEnroll,
-  apiEnrollVoice,
+  apiEnrollVoiceBatch,
+  apiGetVoiceChallenge,
 } from "./api.js";
-import { startVoiceRecording, stopVoiceRecordingToBase64 } from "./voice.js";
+import {
+  startVoiceRecording,
+  stopVoiceRecordingToBase64,
+  recognizeSpeechOnce,
+} from "./voice.js";
 
 export function initEnroll() {
   const enrollUserEl = byId("enrollUser");
@@ -34,11 +39,14 @@ export function initEnroll() {
 
   const progressTextEl = byId("progressText");
   const progressBarEl = byId("progressBar");
+  const angleStatusEl = byId("angleStatus");
+  const angleGuideEl = byId("angleGuide");
   const statusTextEl = byId("statusText");
 
   const btnVoiceStart = byId("btnVoiceStart");
-  const btnVoiceStop = byId("btnVoiceStop");
-  const btnVoiceEnroll = byId("btnVoiceEnroll");
+  const voiceChallengePromptEl = byId("voiceChallengePrompt");
+  const voiceSampleProgressEl = byId("voiceSampleProgress");
+  const voiceTranscriptPreviewEl = byId("voiceTranscriptPreview");
   const audioPreview = byId("audioPreview");
   const voiceStatusEl = byId("voiceStatus");
 
@@ -75,6 +83,9 @@ export function initEnroll() {
   let targetSamples = 15;
   let acceptedSamples = 0;
   let voiceB64 = null;
+  let voiceChallengeId = null;
+  let voiceSamples = [];
+  let voiceListening = false;
   let faceEnrollmentCompleted = false;
   let voiceEnrollmentCompleted = false;
 
@@ -86,6 +97,43 @@ export function initEnroll() {
   function setVoiceStatus(msg) {
     setText(voiceStatusEl, msg);
     console.log("[VOICE]", msg);
+  }
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function setAngleStatus(requiredAngle, angleCounts) {
+    const counts = angleCounts || { center: 0, left: 0, right: 0 };
+    setText(
+      angleStatusEl,
+      `Required angle: ${requiredAngle} (center:${counts.center} left:${counts.left} right:${counts.right})`
+    );
+
+    const mirroredHint = {
+      center: "DUZ BAK: Kameraya tam karsidan bak.",
+      left: "AYNA MODU: Basini KENDI SAGINA cevir (kamera SOL bekliyor).",
+      right: "AYNA MODU: Basini KENDI SOLUNA cevir (kamera SAG bekliyor).",
+    };
+    setText(
+      angleGuideEl,
+      mirroredHint[requiredAngle] || "Yuzunu kamerada istenen yone cevir."
+    );
+  }
+
+  function updateVoiceSampleProgress() {
+    const current = Math.min(voiceSamples.length + 1, 3);
+    setText(voiceSampleProgressEl, `Saved ${voiceSamples.length}/3 samples. Current prompt ${current}/3`);
+  }
+
+  function resetCurrentVoiceCapture() {
+    voiceB64 = null;
+    setText(voiceTranscriptPreviewEl, "Waiting for answer...");
+    if (audioPreview) {
+      audioPreview.pause?.();
+      audioPreview.src = "";
+      audioPreview.classList.add("hidden");
+    }
   }
 
   function setProgress(count, target) {
@@ -123,8 +171,31 @@ export function initEnroll() {
     setText(stepTitleEl, "Voice Enrollment");
     setText(
       stepDescriptionEl,
-      "Record a short voice sample and save it as your voice template."
+      "Speak the shown prompt, stop recording, type the short answer you said, then save the sample. After 3 samples voice enrollment completes automatically."
     );
+
+    if (!voiceChallengeId) {
+      loadVoiceChallenge();
+    }
+    updateVoiceSampleProgress();
+  }
+
+  async function loadVoiceChallenge() {
+    try {
+      const usedIds = voiceSamples.map((sample) => sample.challenge_id);
+      const challenge = await apiGetVoiceChallenge(usedIds);
+      voiceChallengeId = challenge?.challenge_id || null;
+      setText(
+        voiceChallengePromptEl,
+        challenge?.prompt || "Please answer the displayed challenge question."
+      );
+      resetCurrentVoiceCapture();
+      if (btnVoiceStart) btnVoiceStart.disabled = false;
+    } catch (e) {
+      console.error(e);
+      setText(voiceChallengePromptEl, "Challenge question unavailable.");
+      voiceChallengeId = null;
+    }
   }
 
   function showCompleteStep() {
@@ -236,6 +307,11 @@ export function initEnroll() {
       const startRes = await apiStartEnroll(username, role);
       sessionId = startRes?.session_id || null;
       setProgress(0, startRes?.target || 15);
+      setAngleStatus(startRes?.required_angle || "center", {
+        center: 0,
+        left: 0,
+        right: 0,
+      });
 
       isCapturing = true;
       if (btnStartEnroll) btnStartEnroll.disabled = true;
@@ -256,8 +332,10 @@ export function initEnroll() {
 
           if (r?.accepted) {
             setProgress(r.count ?? acceptedSamples, r.target ?? targetSamples);
+            setAngleStatus(r?.required_angle || "center", r?.angle_counts);
           } else if (r?.reason) {
             setStatus(`Collecting... (${r.reason})`);
+            setAngleStatus(r?.required_angle || "center", r?.angle_counts);
           }
 
           const reached =
@@ -292,25 +370,19 @@ export function initEnroll() {
   btnVoiceStart?.addEventListener("click", async () => {
     try {
       voiceB64 = null;
+      if (voiceListening) return;
+      voiceListening = true;
       if (btnVoiceStart) btnVoiceStart.disabled = true;
-      if (btnVoiceStop) btnVoiceStop.disabled = false;
-      if (btnVoiceEnroll) btnVoiceEnroll.disabled = true;
+      const startedAt = Date.now();
+      const minRecordMs = 2500;
 
-      setVoiceStatus("Recording...");
+      setVoiceStatus("Listening... Answer the prompt naturally. When your answer is heard, the next question will load automatically.");
       await startVoiceRecording();
-    } catch (e) {
-      console.error(e);
-      setVoiceStatus(`Microphone error: ${e.message || "UNKNOWN_ERROR"}`);
-      if (btnVoiceStart) btnVoiceStart.disabled = false;
-      if (btnVoiceStop) btnVoiceStop.disabled = true;
-      if (btnVoiceEnroll) btnVoiceEnroll.disabled = false;
-    }
-  });
-
-  btnVoiceStop?.addEventListener("click", async () => {
-    try {
-      if (btnVoiceStop) btnVoiceStop.disabled = true;
-
+      const transcript = await recognizeSpeechOnce({ lang: "tr-TR", timeoutMs: 9000 });
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < minRecordMs) {
+        await sleep(minRecordMs - elapsed);
+      }
       const { blob, b64 } = await stopVoiceRecordingToBase64();
       voiceB64 = b64;
 
@@ -319,33 +391,53 @@ export function initEnroll() {
         audioPreview.classList.remove("hidden");
       }
 
-      setVoiceStatus("Voice recorded.");
+      setText(voiceTranscriptPreviewEl, transcript);
+      setVoiceStatus("Answer heard. Saving sample...");
 
-      if (btnVoiceStart) btnVoiceStart.disabled = false;
-      if (btnVoiceEnroll) btnVoiceEnroll.disabled = !voiceB64;
-    } catch (e) {
-      console.error(e);
-      setVoiceStatus(`Stop/encode failed: ${e.message || "UNKNOWN_ERROR"}`);
-      if (btnVoiceStart) btnVoiceStart.disabled = false;
-      if (btnVoiceStop) btnVoiceStop.disabled = true;
-    }
-  });
-
-  btnVoiceEnroll?.addEventListener("click", async () => {
-    try {
-      if (!voiceB64) {
-        setVoiceStatus("Record voice first.");
+      if (!voiceChallengeId) {
+        throw new Error("Challenge question not ready.");
+      }
+      if (voiceSamples.length >= 3) {
+        setVoiceStatus("Already collected 3 samples.");
         return;
       }
 
-      if (btnVoiceEnroll) btnVoiceEnroll.disabled = true;
-      setVoiceStatus("Saving voice template...");
+      voiceSamples.push({
+        voice_wav_b64: voiceB64,
+        challenge_id: voiceChallengeId,
+        challenge_answer_text: transcript,
+      });
 
-      const res = await apiEnrollVoice(username, role, voiceB64);
-      console.log("[VOICE ENROLL STATUS]", res?.status);
-      setVoiceStatus(
-        res?.status ? `Voice enrolled: ${res.status}` : "Voice enrolled."
+      setVoiceStatus(`Sample ${voiceSamples.length}/3 saved.`);
+      updateVoiceSampleProgress();
+
+      if (voiceSamples.length < 3) {
+        await loadVoiceChallenge();
+        setVoiceStatus(`Sample ${voiceSamples.length}/3 saved. Next prompt loaded automatically.`);
+        return;
+      }
+
+      if (btnVoiceStart) btnVoiceStart.disabled = true;
+      setText(voiceChallengePromptEl, "3 samples captured. Finalizing voice enrollment...");
+      setVoiceStatus("Saving merged voice template from 3 samples...");
+
+      const res = await apiEnrollVoiceBatch(
+        username,
+        role,
+        voiceSamples
       );
+      console.log("[VOICE ENROLL STATUS]", res?.status, res?.reason || "");
+
+      if ((res?.status || "").toUpperCase() === "FAILED") {
+        const detail = res?.detail ? ` (${JSON.stringify(res.detail)})` : "";
+        setVoiceStatus(
+          `Voice enroll failed: ${res?.reason || "UNKNOWN_ERROR"}${detail}`
+        );
+      } else {
+        setVoiceStatus(
+          res?.status ? `Voice enrolled: ${res.status}` : "Voice enrolled."
+        );
+      }
 
       const status = (res?.status || "").toUpperCase();
 
@@ -357,12 +449,19 @@ export function initEnroll() {
         voiceEnrollmentCompleted = true;
         updateStepButtons();
         setVoiceStatus("Voice enrollment complete. Click 'Finish Enrollment' to complete.");
+        setText(voiceSampleProgressEl, "Saved 3/3 samples. Voice enrollment completed.");
       }
     } catch (e) {
       console.error(e);
+      try {
+        if (voiceListening) {
+          await stopVoiceRecordingToBase64();
+        }
+      } catch {}
       setVoiceStatus(`Voice enroll failed: ${e.message || "UNKNOWN_ERROR"}`);
+      if (btnVoiceStart) btnVoiceStart.disabled = false;
     } finally {
-      if (btnVoiceEnroll) btnVoiceEnroll.disabled = false;
+      voiceListening = false;
     }
   });
 
@@ -391,11 +490,13 @@ export function initEnroll() {
   });
 
   setProgress(0, targetSamples);
+  setAngleStatus("center", { center: 0, left: 0, right: 0 });
+  updateVoiceSampleProgress();
+  setText(voiceTranscriptPreviewEl, "Waiting for answer...");
   setStatus("Ready.");
   setVoiceStatus("Ready.");
 
   if (btnStopEnroll) btnStopEnroll.disabled = true;
-  if (btnVoiceStop) btnVoiceStop.disabled = true;
 
   faceEnrollmentCompleted = false;
   voiceEnrollmentCompleted = false;

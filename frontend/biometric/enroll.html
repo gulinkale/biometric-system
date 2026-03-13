@@ -65,6 +65,14 @@
             </div>
           </div>
 
+          <p id="angleStatus" class="status-line">Required angle: center</p>
+          <div
+            id="angleGuide"
+            style="margin-top:8px; background:#0f172a; color:#f8fafc; border-radius:10px; padding:14px 16px; font-size:1rem; font-weight:700; text-align:center;"
+          >
+            Turn your HEAD as instructed below.
+          </div>
+
           <p id="statusText" class="status-line">Ready.</p>
 
           <div class="button-row compact-actions">
@@ -84,10 +92,19 @@
               Record a short voice sample and save it as your voice template.
             </p>
 
+            <p id="voiceChallengePrompt" class="status-line">
+              Challenge question will appear here.
+            </p>
+            <p id="voiceSampleProgress" class="status-line">
+              Sample 1/3
+            </p>
+
             <div class="button-row compact-actions">
-              <button class="btn" id="btnVoiceStart" type="button">Start Recording</button>
-              <button class="btn" id="btnVoiceStop" type="button">Stop Recording</button>
-              <button class="btn" id="btnVoiceEnroll" type="button">Enroll Voice</button>
+              <button class="btn" id="btnVoiceStart" type="button">Listen And Save Answer</button>
+            </div>
+
+            <div class="button-row compact-actions">
+              <span class="status-line" id="voiceTranscriptPreview">Waiting for answer...</span>
             </div>
 
             <audio id="audioPreview" class="hidden audio-preview" controls></audio>

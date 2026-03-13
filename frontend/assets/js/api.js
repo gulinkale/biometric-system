@@ -61,11 +61,41 @@ export function apiFinishEnroll(session_id) {
 // -------------------------
 // ENROLL (VOICE - identity template)
 // -------------------------
-export function apiEnrollVoice(username, role, voice_wav_b64) {
+export function apiGetVoiceChallenge(excludeIds = []) {
+  const query = excludeIds.length
+    ? `?${excludeIds.map((id) => `exclude_ids=${encodeURIComponent(id)}`).join("&")}`
+    : "";
+
+  return jsonFetch(`/enroll/voice/challenge${query}`, {
+    method: "GET",
+  });
+}
+
+export function apiEnrollVoice(
+  username,
+  role,
+  voice_wav_b64,
+  challenge_id,
+  challenge_answer_text
+) {
   return jsonFetch("/enroll/voice", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, role, voice_wav_b64 }),
+    body: JSON.stringify({
+      username,
+      role,
+      voice_wav_b64,
+      challenge_id,
+      challenge_answer_text,
+    }),
+  });
+}
+
+export function apiEnrollVoiceBatch(username, role, samples) {
+  return jsonFetch("/enroll/voice/batch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, role, samples }),
   });
 }
 
@@ -78,6 +108,28 @@ export function apiIdentifyFace(face_image_b64) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ face_image_b64 }),
+  });
+}
+
+export function apiIdentifyVoiceChallenge() {
+  return jsonFetch("/identify/voice-challenge", {
+    method: "GET",
+  });
+}
+
+export function apiValidateIdentifyVoiceChallenge(challenge_id, answer_text) {
+  return jsonFetch("/identify/voice-challenge/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ challenge_id, answer_text }),
+  });
+}
+
+export function apiIdentifyPoseCheck(face_image_b64, required_turn) {
+  return jsonFetch("/identify/pose-check", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ face_image_b64, required_turn }),
   });
 }
 

@@ -182,3 +182,57 @@ export async function stopVoiceRecordingToBase64() {
   const b64 = await blobToBase64(blob);
   return { blob, b64 };
 }
+
+export async function recognizeSpeechOnce({ lang = "tr-TR", timeoutMs = 7000 } = {}) {
+  const SpeechRecognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    throw new Error("SPEECH_RECOGNITION_UNSUPPORTED");
+  }
+
+  return new Promise((resolve, reject) => {
+    const recognition = new SpeechRecognition();
+    let done = false;
+
+    const finish = (fn, value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        recognition.stop();
+      } catch {}
+      fn(value);
+    };
+
+    recognition.lang = lang;
+    recognition.interimResults = false;
+    recognition.continuous = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event) => {
+      const transcript =
+        event?.results?.[0]?.[0]?.transcript?.trim() || "";
+      if (!transcript) {
+        finish(reject, new Error("SPEECH_EMPTY"));
+        return;
+      }
+      finish(resolve, transcript);
+    };
+
+    recognition.onerror = (event) => {
+      const code = event?.error ? `SPEECH_${String(event.error).toUpperCase()}` : "SPEECH_ERROR";
+      finish(reject, new Error(code));
+    };
+
+    recognition.onnomatch = () => {
+      finish(reject, new Error("SPEECH_NO_MATCH"));
+    };
+
+    const timer = setTimeout(() => {
+      finish(reject, new Error("SPEECH_TIMEOUT"));
+    }, timeoutMs);
+
+    recognition.start();
+  });
+}

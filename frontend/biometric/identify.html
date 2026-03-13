@@ -10,6 +10,14 @@
 <body data-page="identify">
   <div class="app-container">
 
+    <div class="card" id="flowDebugPanel" style="border:1px dashed #3a6ea5; background:#122238; padding:10px 12px; margin-bottom:12px;">
+      <h3 style="margin:0 0 8px 0; font-size:0.95rem;">Flow Debug</h3>
+      <p class="muted" style="margin:2px 0;">Step: <span id="flowDebugStep">-</span></p>
+      <p class="muted" style="margin:2px 0;">Status: <span id="flowDebugStatus">-</span></p>
+      <p class="muted" style="margin:2px 0;">Reason: <span id="flowDebugReason">-</span></p>
+      <p class="muted" style="margin:2px 0;">Score: <span id="flowDebugScore">-</span></p>
+    </div>
+
     <!-- STEP 1: FACE -->
     <div class="card" id="step-face">
       <h2>Face</h2>
@@ -30,38 +38,29 @@
       <p id="faceStatus" class="muted" style="margin-top:10px;"></p>
     </div>
 
-    <!-- STEP 2: VOICE -->
-    <div class="card hidden" id="step-voice">
-      <h2>Voice</h2>
-      <p>Please speak for 3–5 seconds.</p>
+    <!-- STEP 2: LIVENESS -->
+    <div class="card hidden" id="step-liveness">
+      <p id="identifiedUserBanner" style="display:none; background:#1e3a5f; color:#7ecfff; border:1px solid #3a6ea5; border-radius:6px; padding:7px 14px; margin-bottom:12px; font-size:0.9rem; text-align:center;">🔍 Identified as: <strong id="identifiedUserName"></strong></p>
+      <h2>Liveness Challenge</h2>
+      <p id="identifyChallengePrompt">Challenge question loading...</p>
 
-      <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
-        <button class="btn" id="btnVoiceStart" type="button">Start</button>
-        <button class="btn" id="btnVoiceStop" type="button" disabled>Stop</button>
+      <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:10px;">
+        <button class="btn" id="btnCaptureChallengeAnswer" type="button">Capture Spoken Answer</button>
+        <button class="btn" id="btnRefreshIdentifyChallenge" type="button">New Question</button>
       </div>
 
-      <audio
-        id="audioPreview"
-        class="hidden"
-        controls
-        style="margin-top:16px; width:100%;"
-      ></audio>
+      <input id="identifyChallengeAnswer" class="auth-input" type="text" placeholder="Challenge answer transcript" autocomplete="off" />
 
-      <p id="voiceStatus" class="muted" style="margin-top:10px;"></p>
+      <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:10px;">
+        <button class="btn" id="btnCheckTurnRight" type="button">Check RIGHT turn</button>
+        <button class="btn" id="btnCheckTurnLeft" type="button">Check LEFT turn</button>
+      </div>
+
+      <p id="livenessStatus" class="muted" style="margin-top:10px;"></p>
+      <button class="btn" id="btnLivenessContinue" type="button" disabled>Complete Verification</button>
     </div>
 
-    <!-- STEP 3: VERIFY -->
-    <div class="card hidden" id="step-verify">
-      <h2>Verify</h2>
-      <p>Send face + voice to backend.</p>
-
-      <button class="btn" id="btnVerify" type="button" disabled>Verify</button>
-      <button class="btn" id="btnRestart" type="button" style="margin-top:12px;">Restart</button>
-
-      <p id="statusText" class="muted" style="margin-top:10px;"></p>
-    </div>
-
-    <!-- STEP 4: RESULT -->
+    <!-- STEP 3: RESULT -->
     <div class="card hidden" id="step-result">
       <h2>Result</h2>
 
@@ -69,10 +68,11 @@
 
       <div class="score-box">
         <p>Face Score: <span id="face-score">-</span></p>
-        <p>Voice Score: <span id="voice-score">-</span></p>
-        <p>Fusion Score: <span id="fusion-score">-</span></p>
+        <p>Liveness: <span id="voice-score">-</span></p>
+        <p>Overall: <span id="fusion-score">-</span></p>
       </div>
 
+      <p id="statusText" class="muted" style="margin-top:10px;"></p>
       <button class="btn" id="btnRestartResult" type="button">Restart</button>
     </div>
 
