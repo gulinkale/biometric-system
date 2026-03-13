@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.db.models import User, BiometricData
 from app.services.eye_state_detector import EyeStateDetector
 from app.services.face_processor import FaceProcessor
+from app.services.fusion import fuse
 from app.services.voice_processor import VoiceProcessor, VoiceFeatures
 
 
@@ -25,6 +26,7 @@ class AuthenticationService:
         self.fusion_thr = settings.FUSION_PASS_THRESHOLD
         self.identification_thr = settings.FACE_IDENTIFICATION_THRESHOLD
         self.voice_ident_thr = settings.VOICE_IDENTIFICATION_THRESHOLD
+        self.voice_template_update_thr = settings.VOICE_TEMPLATE_UPDATE_THRESHOLD
 
     # =====================================================
     # Utils
@@ -118,6 +120,12 @@ class AuthenticationService:
             return self._l2norm(vec), nose_x_ratio
         except Exception:
             return None, None
+
+    def count_faces(self, face_img: np.ndarray) -> Optional[int]:
+        try:
+            return int(self.face.count_faces(face_img))
+        except Exception:
+            return None
 
     # ---------------- Voice embedding ----------------
 
@@ -254,7 +262,7 @@ class AuthenticationService:
             sim = self._cosine(v, old_v)
 
             # Prevent hijacking an existing user's voice template with someone else.
-            if sim < self.voice_ident_thr and not allow_low_similarity_update:
+            if sim < self.voice_template_update_thr and not allow_low_similarity_update:
                 return {
                     "status": "FAILED",
                     "reason": "VOICE_IDENTITY_MISMATCH",
@@ -314,11 +322,41 @@ class AuthenticationService:
 
         return self._l2norm(vec)
 
+    async def _get_user_face_template(
+        self,
+        session: AsyncSession,
+        user_id: int,
+    ) -> Optional[np.ndarray]:
+        result = await session.execute(
+            select(BiometricData).where(
+                BiometricData.user_id == user_id,
+                BiometricData.type == "face_feature",
+            )
+        )
+        bio = result.scalar_one_or_none()
+
+        if not bio or not bio.enc_feature_blob:
+            return None
+
+        vec = np.frombuffer(bio.enc_feature_blob, dtype=np.float32)
+        if vec.size == 0:
+            return None
+
+        return self._l2norm(vec)
+
     # =====================================================
     # Identification (1:N) - FACE
     # =====================================================
 
     async def identify_face(self, session: AsyncSession, face_img: np.ndarray) -> dict:
+        face_count = self.count_faces(face_img)
+        if face_count is not None and face_count > 1:
+            return {
+                "identified": False,
+                "similarity": 0.0,
+                "reason": "MULTIPLE_FACES_DETECTED",
+            }
+
         query_vec, nose_x_ratio = self.extract_face_embedding_and_pose(face_img)
         if query_vec is None:
             return {
@@ -457,7 +495,7 @@ class AuthenticationService:
         voice_score = float(self._cosine(probe_v, tmpl_v))
 
         if voice_score < self.voice_ident_thr:
-            fusion_score = float((face_score + voice_score) / 2.0)
+            fusion_score = float(fuse(face_score=face_score, voice_score=voice_score))
             return {
                 "decision": "DENIED",
                 "reason": "VOICE_NOT_MATCHED",
@@ -467,7 +505,7 @@ class AuthenticationService:
                 "voice_score": float(voice_score),
             }
 
-        fusion_score = float((face_score + voice_score) / 2.0)
+        fusion_score = float(fuse(face_score=face_score, voice_score=voice_score))
         decision = "ACCEPTED" if fusion_score >= self.fusion_thr else "DENIED"
         reason = "OK" if decision == "ACCEPTED" else "FUSION_THRESHOLD"
 

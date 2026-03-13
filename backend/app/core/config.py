@@ -10,10 +10,14 @@ class Settings(BaseSettings):
     FEATURE_ENC_KEY_B64: str = ""  # base64 key for Fernet (set in .env)
 
     # Thresholds (tune later)
-    FACE_IDENTIFICATION_THRESHOLD: float = 0.35
-    VOICE_IDENTIFICATION_THRESHOLD: float = 0.88  # stricter speaker match threshold
-    FACE_LIVENESS_THRESHOLD: float = 0.60
-    VOICE_LIVENESS_THRESHOLD: float = 0.60
-    FUSION_PASS_THRESHOLD: float = 0.82  # weighted fusion score
+    FACE_IDENTIFICATION_THRESHOLD: float = 0.80
+    FACE_LIVENESS_IDENTITY_THRESHOLD: float = 0.80
+    FACE_POSE_IDENTITY_THRESHOLD: float = 0.70
+    FACE_POSE_MIN_DELTA: float = 0.08
+    VOICE_IDENTIFICATION_THRESHOLD: float = 0.70
+    VOICE_TEMPLATE_UPDATE_THRESHOLD: float = 0.70
+    FACE_LIVENESS_THRESHOLD: float = 0.80
+    VOICE_LIVENESS_THRESHOLD: float = 0.70
+    FUSION_PASS_THRESHOLD: float = 0.82
 
 settings = Settings()

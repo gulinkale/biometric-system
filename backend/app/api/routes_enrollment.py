@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import random
-import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +19,7 @@ from app.utils.audio_io import b64_to_wav_mono
 
 router = APIRouter(prefix="/enroll", tags=["enroll"])
 _auth_service = AuthenticationService()
+VOICE_MIN_SAMPLES = 5
 
 
 # =====================================================
@@ -61,14 +61,14 @@ class EnrollVoiceRequest(BaseModel):
     username: str
     role: str
     voice_wav_b64: str
-    challenge_id: str
-    challenge_answer_text: str
+    challenge_id: str = ""
+    challenge_answer_text: str = ""
 
 
 class VoiceSampleRequest(BaseModel):
     voice_wav_b64: str
     challenge_id: str
-    challenge_answer_text: str
+    challenge_answer_text: str = ""
 
 
 class EnrollVoiceBatchRequest(BaseModel):
@@ -77,24 +77,38 @@ class EnrollVoiceBatchRequest(BaseModel):
     samples: List[VoiceSampleRequest]
 
 
-VOICE_CHALLENGES = [
+VOICE_ENROLL_PHRASES = [
     {
-        "id": "tr-weekday",
-        "prompt": "Soru: Gunlerden ne? Lutfen bugunun gununu soyleyin.",
-        "mode": "keyword",
-        "keywords": ["pazartesi", "sali", "carsamba", "persembe", "cuma", "cumartesi", "pazar"],
+        "id": "phrase-hello",
+        "prompt": "Metni oku: Merhaba, ben {username}.",
     },
     {
-        "id": "tr-city",
-        "prompt": "Soru: Hangi sehirde yasiyorsunuz? Lutfen sehir adinizi soyleyin.",
-        "mode": "free_text",
-        "keywords": [],
+        "id": "phrase-name",
+        "prompt": "Metni oku: Benim adim {username}.",
     },
     {
-        "id": "tr-color",
-        "prompt": "Soru: En sevdiginiz renk nedir? Lutfen bir renk soyleyin.",
-        "mode": "keyword",
-        "keywords": ["mavi", "yesil", "kirmizi", "sari", "siyah", "beyaz"],
+        "id": "phrase-register",
+        "prompt": "Metni oku: {username} olarak sisteme kayit yapiyorum.",
+    },
+    {
+        "id": "phrase-auth",
+        "prompt": "Metni oku: Kimlik dogrulamasi icin ses ornegi veriyorum.",
+    },
+    {
+        "id": "phrase-session",
+        "prompt": "Metni oku: Bu ses kaydi bugunku oturum icindir.",
+    },
+    {
+        "id": "phrase-biometric",
+        "prompt": "Metni oku: Biyometrik erisim icin konusuyorum.",
+    },
+    {
+        "id": "phrase-clear",
+        "prompt": "Metni oku: Simdi mikrofona normal tonda konusuyorum.",
+    },
+    {
+        "id": "phrase-template",
+        "prompt": "Metni oku: Bu ornek ses sablonu olusturmak icindir.",
     },
 ]
 
@@ -105,55 +119,23 @@ class VoiceChallengeResponse(BaseModel):
 
 
 @router.get("/voice/challenge", response_model=VoiceChallengeResponse)
-async def get_voice_challenge(exclude_ids: list[str] | None = Query(default=None)):
+async def get_voice_challenge(
+    exclude_ids: list[str] | None = Query(default=None),
+    username: str | None = Query(default=None),
+):
     excluded = {value.strip() for value in (exclude_ids or []) if value and value.strip()}
-    available = [challenge for challenge in VOICE_CHALLENGES if challenge["id"] not in excluded]
+    available = [challenge for challenge in VOICE_ENROLL_PHRASES if challenge["id"] not in excluded]
 
     if not available:
-        available = VOICE_CHALLENGES
+        available = VOICE_ENROLL_PHRASES
 
     challenge = random.choice(available)
+    safe_username = (username or "kullanici").strip() or "kullanici"
+    prompt = challenge["prompt"].replace("{username}", safe_username)
     return VoiceChallengeResponse(
         challenge_id=challenge["id"],
-        prompt=challenge["prompt"],
+        prompt=prompt,
     )
-
-
-def _normalize_text(value: str) -> str:
-    out = (value or "").lower().strip()
-    out = out.replace("ı", "i").replace("ş", "s").replace("ç", "c").replace("ö", "o").replace("ü", "u").replace("ğ", "g")
-    out = re.sub(r"[^a-z0-9 ]+", " ", out)
-    out = re.sub(r"\s+", " ", out).strip()
-    return out
-
-
-def _is_voice_challenge_passed(challenge_id: str, answer_text: str) -> bool:
-    normalized = _normalize_text(answer_text)
-    if not normalized:
-        return False
-
-    challenge = next((c for c in VOICE_CHALLENGES if c["id"] == challenge_id), None)
-    if challenge is None:
-        return False
-
-    mode = challenge.get("mode", "keyword")
-    if mode == "free_text":
-        # City question should accept any meaningful spoken answer.
-        compact = normalized.replace(" ", "")
-        return len(compact) >= 3
-
-    compact_answer = normalized.replace(" ", "")
-    for keyword in challenge.get("keywords", []):
-        nk = _normalize_text(keyword)
-        if not nk:
-            continue
-        if nk in normalized:
-            return True
-        if nk.replace(" ", "") in compact_answer:
-            return True
-
-    # Fallback: ASR can miss diacritics/word boundaries, so accept meaningful speech.
-    return len(compact_answer) >= 3
 
 
 @router.post("/voice")
@@ -170,13 +152,6 @@ async def enroll_voice(req: EnrollVoiceRequest, session: AsyncSession = Depends(
         raise HTTPException(status_code=400, detail="ROLE_EMPTY")
     if not req.voice_wav_b64 or not req.voice_wav_b64.strip():
         raise HTTPException(status_code=400, detail="VOICE_EMPTY")
-    if not req.challenge_id or not req.challenge_id.strip():
-        raise HTTPException(status_code=400, detail="VOICE_CHALLENGE_EMPTY")
-    if not req.challenge_answer_text or not req.challenge_answer_text.strip():
-        raise HTTPException(status_code=400, detail="VOICE_CHALLENGE_ANSWER_EMPTY")
-
-    if not _is_voice_challenge_passed(req.challenge_id, req.challenge_answer_text):
-        return {"status": "FAILED", "reason": "VOICE_CHALLENGE_FAILED"}
 
     # mevcut kullanıcı zorunlu
     await _require_existing_user(session, username)
@@ -197,6 +172,21 @@ async def enroll_voice(req: EnrollVoiceRequest, session: AsyncSession = Depends(
     if result.get("reason") == "USER_NOT_FOUND":
         raise HTTPException(status_code=404, detail="USER_NOT_FOUND")
 
+    # Commit staged face template only after voice succeeds.
+    status = str(result.get("status", "")).upper()
+    if status in {"VOICE_ENROLLED", "VOICE_UPDATED", "VOICE_ALREADY_REGISTERED"}:
+        pending = PENDING_FACE_TEMPLATES.get(username)
+        if pending:
+            face_result = await _auth_service.enroll_user_with_template(
+                session=session,
+                username=username,
+                role=role,
+                face_template=pending["face_template"],
+                n_samples=int(pending.get("n_samples", 0)),
+            )
+            if face_result.get("reason") != "USER_NOT_FOUND":
+                PENDING_FACE_TEMPLATES.pop(username, None)
+
     return result
 
 
@@ -209,8 +199,8 @@ async def enroll_voice_batch(req: EnrollVoiceBatchRequest, session: AsyncSession
         raise HTTPException(status_code=400, detail="USERNAME_EMPTY")
     if not role:
         raise HTTPException(status_code=400, detail="ROLE_EMPTY")
-    if not req.samples or len(req.samples) < 3:
-        raise HTTPException(status_code=400, detail="VOICE_SAMPLES_MIN_3")
+    if not req.samples or len(req.samples) < VOICE_MIN_SAMPLES:
+        raise HTTPException(status_code=400, detail=f"VOICE_SAMPLES_MIN_{VOICE_MIN_SAMPLES}")
 
     await _require_existing_user(session, username)
 
@@ -220,18 +210,6 @@ async def enroll_voice_batch(req: EnrollVoiceBatchRequest, session: AsyncSession
             raise HTTPException(status_code=400, detail="VOICE_EMPTY")
         if not sample.challenge_id or not sample.challenge_id.strip():
             raise HTTPException(status_code=400, detail="VOICE_CHALLENGE_EMPTY")
-        if not sample.challenge_answer_text or not sample.challenge_answer_text.strip():
-            raise HTTPException(status_code=400, detail="VOICE_CHALLENGE_ANSWER_EMPTY")
-
-        if not _is_voice_challenge_passed(sample.challenge_id, sample.challenge_answer_text):
-            return {
-                "status": "FAILED",
-                "reason": "VOICE_CHALLENGE_FAILED",
-                "detail": {
-                    "sample_index": len(vectors) + 1,
-                    "challenge_id": sample.challenge_id,
-                },
-            }
 
         try:
             audio, sr = b64_to_wav_mono(sample.voice_wav_b64)
@@ -245,7 +223,7 @@ async def enroll_voice_batch(req: EnrollVoiceBatchRequest, session: AsyncSession
                 "reason": "VOICE_EMBEDDING_FAILED",
                 "detail": {
                     "sample_index": len(vectors) + 1,
-                    "hint": "Speak at least 2-3 seconds per question",
+                    "hint": "Speak at least 1 second per question",
                 },
             }
         vectors.append(vec)
@@ -262,6 +240,21 @@ async def enroll_voice_batch(req: EnrollVoiceBatchRequest, session: AsyncSession
     if result.get("reason") == "USER_NOT_FOUND":
         raise HTTPException(status_code=404, detail="USER_NOT_FOUND")
 
+    # Commit staged face template only after voice succeeds.
+    status = str(result.get("status", "")).upper()
+    if status in {"VOICE_ENROLLED", "VOICE_UPDATED", "VOICE_ALREADY_REGISTERED"}:
+        pending = PENDING_FACE_TEMPLATES.get(username)
+        if pending:
+            face_result = await _auth_service.enroll_user_with_template(
+                session=session,
+                username=username,
+                role=role,
+                face_template=pending["face_template"],
+                n_samples=int(pending.get("n_samples", 0)),
+            )
+            if face_result.get("reason") != "USER_NOT_FOUND":
+                PENDING_FACE_TEMPLATES.pop(username, None)
+
     return {
         **result,
         "samples_used": len(vectors),
@@ -275,6 +268,7 @@ TARGET_SAMPLES = 15
 TARGET_PER_ANGLE = 5
 SESSION_TTL_SECONDS = 120  # 2 minutes
 ENROLL_SESSIONS: Dict[str, dict] = {}
+PENDING_FACE_TEMPLATES: Dict[str, dict] = {}
 
 
 ANGLE_SEQUENCE = ["center", "left", "right"]
@@ -448,17 +442,17 @@ async def finish(req: EnrollFinishRequest, session: AsyncSession = Depends(get_s
     template = np.mean(np.stack(embs, axis=0), axis=0)
     template = template / (np.linalg.norm(template) + 1e-9)
 
-    result = await _auth_service.enroll_user_with_template(
-        session=session,
-        username=s["username"],
-        role=s["role"],
-        face_template=template,
-        n_samples=len(embs),
-    )
+    # Stage face template in memory. Persist only after voice enrollment succeeds.
+    PENDING_FACE_TEMPLATES[s["username"]] = {
+        "face_template": template,
+        "n_samples": len(embs),
+        "created_at": time(),
+    }
 
     ENROLL_SESSIONS.pop(req.session_id, None)
 
-    if result.get("reason") == "USER_NOT_FOUND":
-        raise HTTPException(status_code=404, detail="USER_NOT_FOUND")
-
-    return result
+    return {
+        "status": "FACE_STAGED",
+        "n_samples": len(embs),
+        "message": "Face template staged. It will be saved after voice enrollment succeeds.",
+    }

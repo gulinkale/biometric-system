@@ -28,6 +28,16 @@ class FaceProcessor:
     def is_available(self) -> bool:
         return self._model is not None
 
+    def count_faces(self, bgr_img: np.ndarray) -> int:
+        if self._model is None:
+            raise ValueError("FACE_PROCESSOR_UNAVAILABLE")
+
+        if bgr_img is None or bgr_img.size == 0:
+            raise ValueError("INVALID_IMAGE")
+
+        faces = self._model.get(bgr_img)
+        return len(faces)
+
     def extract_embedding(self, bgr_img: np.ndarray) -> np.ndarray:
         embedding, _ = self.extract_embedding_and_pose(bgr_img)
         return embedding
