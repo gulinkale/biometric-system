@@ -1,10 +1,11 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     APP_NAME: str = "Multi-Modal Biometric Auth"
-    DATABASE_URL: str = "sqlite+aiosqlite:///./app.db"
+    DATABASE_URL: str = Field(...)
 
     # Feature encryption (store only encrypted processed features)
     FEATURE_ENC_KEY_B64: str = ""  # base64 key for Fernet (set in .env)
