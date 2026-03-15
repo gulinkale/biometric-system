@@ -195,6 +195,40 @@ class AuthenticationService:
         if user is None:
             return {"status": "FAILED", "reason": "USER_NOT_FOUND"}
 
+        # --- YENİ: Tüm açılardaki embedding'ler için başka kullanıcıya aitlik kontrolü ---
+        # Önce tüm pozlar için başka kullanıcıya aitlik kontrolü yap, eğer bloklanırsa hiçbir kayıt işlemi yapma
+        for pose, vec in pose_templates.items():
+            if vec is None:
+                continue
+            if pose == "center":
+                bio_types = [LEGACY_FACE_TEMPLATE_TYPE, FACE_TEMPLATE_TYPE_BY_POSE[pose]]
+            else:
+                bio_types = [FACE_TEMPLATE_TYPE_BY_POSE[pose]]
+            result_all = await session.execute(
+                select(BiometricData, User)
+                .join(User, BiometricData.user_id == User.user_id)
+                .where(
+                    BiometricData.type.in_(bio_types),
+                    BiometricData.user_id != user.user_id
+                )
+            )
+            all_face_data = result_all.all()
+            for other_face, other_user in all_face_data:
+                other_vec = np.frombuffer(other_face.enc_feature_blob, dtype=np.float32)
+                other_vec = self._l2norm(other_vec)
+                sim = self._cosine(vec, other_vec)
+                print(f"[DEBUG][POSE={pose}] Compare {user.username} vs {other_user.username} | sim={sim:.4f}")
+                if sim >= 0.80:
+                    print(f"[DEBUG][POSE={pose}] BLOCKED: {user.username} ile {other_user.username} aynı yüz! sim={sim:.4f}")
+                    return {
+                        "status": "FACE_ALREADY_REGISTERED_OTHER_USER",
+                        "reason": f"This face is already registered to user: {other_user.username}",
+                        "similarity": float(sim),
+                        "other_user_id": other_user.user_id,
+                        "other_username": other_user.username,
+                        "pose": pose,
+                    }
+
         saved_poses: list[str] = []
         for pose, bio_type in FACE_TEMPLATE_TYPE_BY_POSE.items():
             vec = pose_templates.get(pose)
@@ -209,13 +243,13 @@ class AuthenticationService:
             saved_poses.append(pose)
 
         # Backward compatibility: keep the legacy face template for generic flows.
-        center_vec = pose_templates.get("center")
-        if center_vec is not None:
+        legacy_center = pose_templates.get("center")
+        if legacy_center is not None:
             await self._upsert_biometric_vector(
                 session=session,
                 user_id=user.user_id,
                 bio_type=LEGACY_FACE_TEMPLATE_TYPE,
-                vec=center_vec,
+                vec=legacy_center,
             )
 
         await session.commit()
@@ -247,6 +281,32 @@ class AuthenticationService:
         vec = self._l2norm(face_template)
         blob = vec.astype(np.float32).tobytes()
 
+        # --- YENİ: Diğer kullanıcıların yüz embedding'leriyle karşılaştır ---
+        # Tüm face_feature kayıtlarını çek (kendi user_id'si hariç)
+        result_all = await session.execute(
+            select(BiometricData, User)
+            .join(User, BiometricData.user_id == User.user_id)
+            .where(
+                BiometricData.type == "face_feature",
+                BiometricData.user_id != user.user_id
+            )
+        )
+        all_face_data = result_all.all()
+        for other_face, other_user in all_face_data:
+            other_vec = np.frombuffer(other_face.enc_feature_blob, dtype=np.float32)
+            other_vec = self._l2norm(other_vec)
+            sim = self._cosine(vec, other_vec)
+            if sim >= 0.95:
+                return {
+                    "status": "FACE_ALREADY_REGISTERED_OTHER_USER",
+                    "reason": f"This face is already registered to user: {other_user.username}",
+                    "similarity": float(sim),
+                    "other_user_id": other_user.user_id,
+                    "other_username": other_user.username,
+                    "n_samples": int(n_samples),
+                }
+
+        # --- Mevcut kullanıcıya ait eski embedding ile karşılaştırma (eski kod) ---
         result2 = await session.execute(
             select(BiometricData).where(
                 BiometricData.user_id == user.user_id,
@@ -493,14 +553,6 @@ class AuthenticationService:
                 "reason": "NO_FACE_DETECTED",
             }
 
-        # Mirror-safe matching: compare against both original and horizontally flipped query.
-        flipped_query_vec = None
-        try:
-            flipped_img = np.ascontiguousarray(face_img[:, ::-1])
-            flipped_query_vec = self.extract_face_embedding(flipped_img)
-        except Exception:
-            flipped_query_vec = None
-
         # First capture must be frontal enough to reduce side-pose false positives.
         if nose_x_ratio is None or nose_x_ratio < 0.44 or nose_x_ratio > 0.56:
             return {
@@ -536,8 +588,6 @@ class AuthenticationService:
                 continue
 
             sim = self._cosine(query_vec, db_vec)
-            if flipped_query_vec is not None:
-                sim = max(sim, self._cosine(flipped_query_vec, db_vec))
             if sim > best_score:
                 best_score = sim
                 best_user = user

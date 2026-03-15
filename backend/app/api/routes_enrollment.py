@@ -459,6 +459,18 @@ async def finish(req: EnrollFinishRequest, session: AsyncSession = Depends(get_s
         "right": len(by_angle.get("right", [])),
     }
 
+    # --- YENİ: Yüz başka kullanıcıya aitse enroll tamamlanmasın, bilgi dönsün ---
+    enroll_result = await _auth_service.enroll_user_with_pose_templates(
+        session=session,
+        username=s["username"],
+        role=s["role"],
+        pose_templates=pose_templates,
+        n_samples_by_pose=samples_by_pose,
+    )
+    if enroll_result.get("status") == "FACE_ALREADY_REGISTERED_OTHER_USER":
+        ENROLL_SESSIONS.pop(req.session_id, None)
+        return enroll_result
+
     # Stage pose-aware face templates in memory. Persist only after voice enrollment succeeds.
     PENDING_FACE_TEMPLATES[s["username"]] = {
         "pose_templates": pose_templates,

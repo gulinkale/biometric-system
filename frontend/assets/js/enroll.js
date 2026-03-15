@@ -357,8 +357,9 @@ export function initEnroll() {
   }
 
   function updateStepButtons() {
+    // Yüz kaydı tamamlanmasa bile kullanıcı Continue to Voice butonuna basabilsin
     if (btnGoVoice) {
-      btnGoVoice.disabled = !faceEnrollmentCompleted;
+      btnGoVoice.disabled = false;
     }
 
     if (btnGoComplete) {
@@ -382,28 +383,33 @@ export function initEnroll() {
     if (doFinish && sessionId) {
       try {
         const result = await apiFinishEnroll(sessionId);
+        console.log("[DEBUG][ENROLL FINISH RESULT]", result);
         const nSamples = result?.n_samples ?? acceptedSamples;
+        // status'u normalize et
+        let status = (result?.status || "").trim().toUpperCase();
+        console.log("[DEBUG][ENROLL FINISH STATUS]", status);
+        // Eğer başka kullanıcıya aitse bariz uyarı göster ve akışı durdur
+        if (status === "FACE_ALREADY_REGISTERED_OTHER_USER") {
+          setStatus("❌ Bu yüz zaten başka bir kullanıcıya ait. Kayıt tamamlanmadı.");
+          alert("❌ Bu yüz zaten başka bir kullanıcıya ait. Kayıt tamamlanmadı.");
+          return;
+        }
         setStatus(`Saved: ${result?.status || "OK"} (samples: ${nSamples})`);
 
-        const status = (result?.status || "").toUpperCase();
-        console.log("[FACE FINISH STATUS]", status);
-        console.log("[FACE FINISH NSAMPLES]", nSamples);
-
-        // sample geldiyse veya backend olumlu bir status döndüyse tamam kabul et
+        // Sadece başarılı durumlarda otomatik geçiş yap
         if (
-          nSamples > 0 ||
-          status === "FACE_STAGED" ||
-          status === "ENROLLED" ||
-          status === "FACE_UPDATED" ||
-          status === "FACE_ALREADY_REGISTERED"
+          status !== "FACE_ALREADY_REGISTERED_OTHER_USER" && (
+            nSamples > 0 ||
+            status === "FACE_STAGED" ||
+            status === "ENROLLED" ||
+            status === "FACE_UPDATED" ||
+            status === "FACE_ALREADY_REGISTERED"
+          )
         ) {
           faceEnrollmentCompleted = true;
           updateStepButtons();
-          console.log("[FACE COMPLETED]", faceEnrollmentCompleted);
           setStatus(`Face enrollment complete. Switching to voice step...`);
-          
           setTimeout(() => {
-            console.log("[DEBUG] Calling showVoiceStep()");
             showVoiceStep();
           }, 300);
         }
