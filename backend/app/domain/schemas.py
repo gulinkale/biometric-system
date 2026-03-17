@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, field_validator, model_validator
-
+from typing import Optional
 
 class VerifyRequest(BaseModel):
     face_image_b64: Optional[str] = None
@@ -15,7 +15,7 @@ class VerifyRequest(BaseModel):
             return None
         if isinstance(v, str) and v.strip() == "":
             return None
-        return None if v is None else v
+        return v
 
     @model_validator(mode="after")
     def at_least_one_modality(self):
@@ -89,16 +89,41 @@ class LoginResponse(BaseModel):
     role: str
 
 
+class BiometricFaceSample(BaseModel):
+    image_b64: str
+    angle: Literal["center", "left", "right"]
+
+
 class BiometricVoiceSample(BaseModel):
     voice_wav_b64: str
+    prompt_text: str
     transcript_text: Optional[str] = None
 
 
 class BiometricEnrollRequest(BaseModel):
     username: str
     role: str
-    face_frames_b64: list[str]
+    face_samples: list[BiometricFaceSample]
     voice_samples: list[BiometricVoiceSample]
+
+    @field_validator("username", "role", mode="before")
+    @classmethod
+    def strip_enroll_fields(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+    @model_validator(mode="after")
+    def validate_enroll_fields(self):
+        if not self.username:
+            raise ValueError("Username is required.")
+        if not self.role:
+            raise ValueError("Role is required.")
+        if not self.face_samples:
+            raise ValueError("At least one face sample is required.")
+        if not self.voice_samples:
+            raise ValueError("At least one voice sample is required.")
+        return self
 
 
 class BiometricEnrollResponse(BaseModel):
@@ -107,3 +132,16 @@ class BiometricEnrollResponse(BaseModel):
     user_id: Optional[int] = None
     face_status: Optional[str] = None
     voice_status: Optional[str] = None
+
+# Ses biyometrik kimlik doğrulama için request ve response modelleri
+
+class VoiceIdentifyRequest(BaseModel):
+    voice_b64: str
+    expected_user_id: int
+
+class VoiceIdentifyResponse(BaseModel):
+    user_id: Optional[int] = None
+    score: float
+    passed: bool
+    threshold: float
+    reason: str

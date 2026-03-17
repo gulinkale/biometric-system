@@ -1,3 +1,16 @@
+import { apiIdentifyVoice } from "./api.js";
+// Record voice, convert to base64, and identify user by voice (1:1)
+export async function recordAndIdentifyVoice(expected_user_id) {
+  // Start recording
+  await startVoiceRecording();
+  // Wait for user to finish (could be improved with UI integration)
+  // For now, stop after a fixed time (e.g., 2 seconds)
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  const { b64 } = await stopVoiceRecordingToBase64();
+  // Call API
+  const result = await apiIdentifyVoice(b64, expected_user_id);
+  return result;
+}
 let audioContext = null;
 let mediaStream = null;
 let sourceNode = null;

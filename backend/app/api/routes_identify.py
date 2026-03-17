@@ -1,10 +1,12 @@
+
 import random
 import re
 from datetime import datetime
 from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import get_session
@@ -15,9 +17,52 @@ router = APIRouter(prefix="/identify", tags=["identify"])
 
 _auth_service = AuthenticationService()
 
+# --- Response Models ---
+from pydantic import BaseModel
+class IdentifyFaceResponse(BaseModel):
+    identified: bool
+    user_id: Optional[int] = None
+    username: Optional[str] = None
+    similarity: float
+    reason: str
+
+
+
+class VoiceIdentifyRequest(BaseModel):
+    voice_b64: str
+    expected_user_id: int
+
+class VoiceIdentifyResponse(BaseModel):
+    identified: bool
+    user_id: Optional[int] = None
+    username: Optional[str] = None
+    similarity: float
+    threshold: float
+    reason: str
 
 class IdentifyRequest(BaseModel):
     face_image_b64: str
+from app.utils.audio_io import b64_to_wav_mono
+
+# Ses biyometrik kimlik doğrulama endpoint'i
+@router.post("/voice", response_model=VoiceIdentifyResponse)
+async def identify_voice(
+    req: VoiceIdentifyRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    try:
+        audio, sr = b64_to_wav_mono(req.voice_b64)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"INVALID_AUDIO: {e}")
+
+    # 1:1 voice identification (expected_user_id zorunlu)
+    result = await _auth_service.identify_user_by_voice(
+        session=session,
+        audio=audio,
+        sr=sr,
+        expected_user_id=req.expected_user_id,
+    )
+    return result
 
 
 class VoiceChallengeResponse(BaseModel):
@@ -141,10 +186,9 @@ async def validate_identify_voice_challenge(req: VoiceChallengeValidateRequest):
 @router.post("/pose-check")
 async def identify_pose_check(req: PoseCheckRequest, session: AsyncSession = Depends(get_session)):
     required = (req.required_turn or "").strip().lower()
-    if required not in {"left", "right"}:
+    if required not in {"center", "left", "right"}:
         raise HTTPException(status_code=400, detail="REQUIRED_TURN_INVALID")
 
-    # Side-turn frames naturally reduce face similarity. Use a dedicated threshold.
     pose_identity_thr = float(settings.FACE_POSE_IDENTITY_THRESHOLD)
     pose_min_delta = float(settings.FACE_POSE_MIN_DELTA)
     right_abs_min = float(settings.FACE_POSE_RIGHT_MIN_NOSE_X)
@@ -165,7 +209,7 @@ async def identify_pose_check(req: PoseCheckRequest, session: AsyncSession = Dep
             "face_count": face_count,
         }
 
-    probe_face_vec, nose_x = _auth_service.extract_face_embedding_and_pose(img)
+    probe_face_vec, nose_x, yaw, pitch, bbox_size, blur_score = _auth_service.extract_face_embedding_and_pose(img)
     if probe_face_vec is None:
         return {
             "passed": False,
@@ -194,13 +238,14 @@ async def identify_pose_check(req: PoseCheckRequest, session: AsyncSession = Dep
     similarity = None
     template_similarity = None
     reference_nose_x = None
+
     if req.reference_face_image_b64:
         try:
             ref_img = b64_to_bgr_image(req.reference_face_image_b64)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"INVALID_REFERENCE_IMAGE: {e}")
 
-        _ref_face_vec, reference_nose_x = _auth_service.extract_face_embedding_and_pose(ref_img)
+        _ref_face_vec, reference_nose_x, _ref_yaw, _ref_pitch, _ref_bbox_size, _ref_blur_score = _auth_service.extract_face_embedding_and_pose(ref_img)
         if reference_nose_x is None:
             return {
                 "passed": False,
@@ -211,7 +256,7 @@ async def identify_pose_check(req: PoseCheckRequest, session: AsyncSession = Dep
 
     detected = _bucket_nose_ratio(nose_x)
 
-    # Prefer relative turn detection against frontal reference frame.
+    # Referans frontal frame varsa relative turn hesabı kullan
     if nose_x is not None and reference_nose_x is not None:
         delta = float(nose_x - reference_nose_x)
         if delta >= pose_min_delta:
@@ -221,12 +266,13 @@ async def identify_pose_check(req: PoseCheckRequest, session: AsyncSession = Dep
         else:
             detected = "center"
 
+    # Genel turn eşleşmesi
     if detected != required:
         return {
             "passed": False,
             "required_turn": required,
             "detected_turn": detected,
-            "reason": "POSE_NOT_ENOUGH_TURN" if detected == "center" else "POSE_MISMATCH",
+            "reason": "POSE_NOT_ENOUGH_TURN" if detected == "center" and required in {"left", "right"} else "POSE_MISMATCH",
             "similarity": None,
             "reference_similarity": None,
             "reference_nose_x": reference_nose_x,
@@ -234,7 +280,21 @@ async def identify_pose_check(req: PoseCheckRequest, session: AsyncSession = Dep
             "pose_min_delta": pose_min_delta,
         }
 
-    # Absolute side guard: reject near-frontal frames even if delta briefly crosses threshold.
+    # center için frontal guard
+    if required == "center":
+        if nose_x is None or _bucket_nose_ratio(nose_x) != "center":
+            return {
+                "passed": False,
+                "required_turn": required,
+                "detected_turn": detected,
+                "reason": "FACE_NOT_FRONTAL_ENOUGH",
+                "similarity": None,
+                "reference_similarity": None,
+                "reference_nose_x": reference_nose_x,
+                "nose_x": nose_x,
+            }
+
+    # right için absolute guard
     if required == "right" and (nose_x is None or float(nose_x) < right_abs_min):
         return {
             "passed": False,
@@ -249,6 +309,7 @@ async def identify_pose_check(req: PoseCheckRequest, session: AsyncSession = Dep
             "right_abs_min": right_abs_min,
         }
 
+    # left için absolute guard
     if required == "left" and (nose_x is None or float(nose_x) > left_abs_max):
         return {
             "passed": False,
@@ -263,7 +324,7 @@ async def identify_pose_check(req: PoseCheckRequest, session: AsyncSession = Dep
             "left_abs_max": left_abs_max,
         }
 
-    # Turn direction is valid. Now verify identity only with the requested lateral template.
+    # İstenirse expected user'ın ilgili pose template'i ile identity check
     if req.expected_user_id is not None:
         expected_face_vec = await _auth_service._get_user_face_template(
             session=session,
@@ -298,14 +359,11 @@ async def identify_pose_check(req: PoseCheckRequest, session: AsyncSession = Dep
                 "pose_min_delta": pose_min_delta,
             }
 
-    passed = True
-    reason = "OK"
-
     return {
-        "passed": passed,
+        "passed": True,
         "required_turn": required,
         "detected_turn": detected,
-        "reason": reason,
+        "reason": "OK",
         "similarity": template_similarity if template_similarity is not None else similarity,
         "reference_similarity": similarity,
         "reference_nose_x": reference_nose_x,
@@ -319,12 +377,11 @@ async def identify_blink_check(req: BlinkCheckRequest, session: AsyncSession = D
     if not req.face_frames_b64 or len(req.face_frames_b64) < 6:
         raise HTTPException(status_code=400, detail="BLINK_FRAMES_MIN_6")
 
-    # Optional identity consistency check on the first valid frame.
     first_valid_face_vec = None
     for raw in req.face_frames_b64:
         try:
             probe_img = b64_to_bgr_image(raw)
-            vec, _ = _auth_service.extract_face_embedding_and_pose(probe_img)
+            vec, _nose_x, _yaw, _pitch, _bbox_size, _blur_score = _auth_service.extract_face_embedding_and_pose(probe_img)
             if vec is not None:
                 first_valid_face_vec = vec
                 break
@@ -349,7 +406,10 @@ async def identify_blink_check(req: BlinkCheckRequest, session: AsyncSession = D
                 }
 
     if req.expected_user_id is not None and first_valid_face_vec is not None:
-        expected_vec = await _auth_service._get_user_face_template(session=session, user_id=int(req.expected_user_id))
+        expected_vec = await _auth_service._get_user_face_template(
+            session=session,
+            user_id=int(req.expected_user_id),
+        )
         if expected_vec is not None:
             sim = float(_auth_service._cosine(first_valid_face_vec, expected_vec))
             if sim < float(settings.FACE_POSE_IDENTITY_THRESHOLD):
@@ -393,7 +453,6 @@ async def identify_blink_check(req: BlinkCheckRequest, session: AsyncSession = D
         }
 
     drop_ratio = min_ear / baseline_ear
-    # Blink pattern: significant eye closure and later partial reopen.
     threshold_ratio = 0.65
     blink_idx = int(min(range(len(ear_values)), key=lambda i: ear_values[i]))
     reopened = any(v >= baseline_ear * 0.80 for v in ear_values[blink_idx + 1 :])
@@ -417,7 +476,7 @@ async def identify(req: IdentifyRequest, session: AsyncSession = Depends(get_ses
         img = b64_to_bgr_image(req.face_image_b64)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"INVALID_IMAGE: {e}")
-    
+
     try:
         result = await _auth_service.identify_user(
             session=session,
@@ -425,13 +484,6 @@ async def identify(req: IdentifyRequest, session: AsyncSession = Depends(get_ses
         )
         return result
     except ValueError as e:
-        # FaceProcessor "FACE_NOT_DETECTED" atınca buraya düşecek
         if str(e) == "FACE_NOT_DETECTED":
             raise HTTPException(status_code=400, detail="FACE_NOT_DETECTED")
         raise
-
-    result = await _auth_service.identify_face(
-        session=session,
-        face_img=img,
-    )
-    return result

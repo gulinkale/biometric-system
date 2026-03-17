@@ -34,11 +34,16 @@ async function jsonFetch(path, options = {}) {
 // -------------------------
 // ENROLL (BIOMETRIC - unified)
 // -------------------------
-export function apiEnrollBiometric(username, role, face_frames_b64, voice_samples) {
+export function apiEnrollBiometric(username, role, face_samples, voice_samples) {
   return jsonFetch("/enroll/biometric", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, role, face_frames_b64, voice_samples }),
+    body: JSON.stringify({
+      username,
+      role,
+      face_samples,
+      voice_samples,
+    }),
   });
 }
 
@@ -100,6 +105,17 @@ export function apiIdentifyBlinkCheck(
       reference_face_image_b64,
       expected_user_id,
     }),
+  });
+}
+
+// -------------------------
+// IDENTIFY (1:1) - Voice
+// -------------------------
+export function apiIdentifyVoice(voice_b64, expected_user_id) {
+  return jsonFetch("/identify/voice", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ voice_b64, expected_user_id }),
   });
 }
 

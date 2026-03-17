@@ -1,6 +1,6 @@
 import { byId, setText } from "./dom.js";
 import { startCamera, stopCamera, captureFrameBase64 } from "./camera.js?v=20260314-camera-mirror";
-import { apiEnrollBiometric } from "./api.js";
+import { apiEnrollBiometric, apiIdentifyPoseCheck } from "./api.js";
 import {
   startVoiceRecording,
   stopVoiceRecordingToBase64,
@@ -33,6 +33,9 @@ export function initEnroll() {
   const progressTextEl = byId("progressText");
   const progressBarEl = byId("progressBar");
   const statusTextEl = byId("statusText");
+
+  const angleStatusEl = byId("angleStatus");
+  const angleGuideEl = byId("angleGuide");
 
   const btnVoiceStart = byId("btnVoiceStart");
   const voiceChallengePromptEl = byId("voiceChallengePrompt");
@@ -69,9 +72,12 @@ export function initEnroll() {
   }
 
   // ---------- State ----------
-  const FACE_TARGET_SAMPLES = 15;
-  const VOICE_TARGET_SAMPLES = 5;
+  const FACE_TARGET_PER_ANGLE = 5;
+  const FACE_ANGLE_ORDER = ["center", "left", "right"];
+  const FACE_TOTAL_TARGET = FACE_TARGET_PER_ANGLE * FACE_ANGLE_ORDER.length;
+  const FACE_CAPTURE_INTERVAL_MS = 450;
 
+  const VOICE_TARGET_SAMPLES = 5;
   const VOICE_PROMPTS = [
     "Bugun biyometrik kayit islemi yapiyorum",
     "Kameraya bakiyorum ve net konusuyorum",
@@ -80,9 +86,23 @@ export function initEnroll() {
     "Kayit islemimi basariyla tamamlamak istiyorum",
   ];
 
-  let faceSamples = [];
-  let voiceSamples = [];
+  let requiredAngle = FACE_ANGLE_ORDER[0];
+  let faceCaptureRunning = false;
   let voiceListening = false;
+
+  let faceSamplesByAngle = {
+    center: [],
+    left: [],
+    right: [],
+  };
+
+  let angleCounts = {
+    center: 0,
+    left: 0,
+    right: 0,
+  };
+
+  let voiceSamples = [];
 
   let faceEnrollmentCompleted = false;
   let voiceEnrollmentCompleted = false;
@@ -248,17 +268,73 @@ export function initEnroll() {
     audioPreview.classList.add("hidden");
   }
 
+  function getTotalAcceptedFaceSamples() {
+    return (
+      angleCounts.center +
+      angleCounts.left +
+      angleCounts.right
+    );
+  }
+
+  function getFlattenedFaceSamples() {
+    return [
+      ...faceSamplesByAngle.center,
+      ...faceSamplesByAngle.left,
+      ...faceSamplesByAngle.right,
+    ];
+  }
+
+  function resetFaceEnrollmentState() {
+    requiredAngle = FACE_ANGLE_ORDER[0];
+    faceSamplesByAngle = {
+      center: [],
+      left: [],
+      right: [],
+    };
+    angleCounts = {
+      center: 0,
+      left: 0,
+      right: 0,
+    };
+    faceEnrollmentCompleted = false;
+  }
+
   function updateFaceProgress() {
-    const current = Math.min(faceSamples.length, FACE_TARGET_SAMPLES);
-    setText(progressTextEl, `${current}/${FACE_TARGET_SAMPLES}`);
+    const current = getTotalAcceptedFaceSamples();
+    setText(progressTextEl, `${current}/${FACE_TOTAL_TARGET}`);
 
     if (progressBarEl) {
       const pct = Math.min(
         100,
-        Math.round((current / FACE_TARGET_SAMPLES) * 100)
+        Math.round((current / FACE_TOTAL_TARGET) * 100)
       );
       progressBarEl.style.width = `${pct}%`;
     }
+
+    if (angleStatusEl) {
+      setText(
+        angleStatusEl,
+        `Center: ${angleCounts.center}/${FACE_TARGET_PER_ANGLE} | Left: ${angleCounts.left}/${FACE_TARGET_PER_ANGLE} | Right: ${angleCounts.right}/${FACE_TARGET_PER_ANGLE}`
+      );
+    }
+  }
+
+  function updateFaceGuidance() {
+    const friendly = {
+      center: "Look straight at the camera.",
+      left: "Turn your head LEFT.",
+      right: "Turn your head RIGHT.",
+    };
+
+    if (faceEnrollmentCompleted) {
+      setText(angleGuideEl, "Face enrollment completed.");
+      return;
+    }
+
+    setText(
+      angleGuideEl,
+      friendly[requiredAngle] || "Align your face with the requested direction."
+    );
   }
 
   function updateVoiceSampleProgress() {
@@ -288,6 +364,63 @@ export function initEnroll() {
     );
   }
 
+  function getNextRequiredAngle() {
+    const currentIndex = FACE_ANGLE_ORDER.indexOf(requiredAngle);
+    if (currentIndex < 0) return FACE_ANGLE_ORDER[0];
+    return FACE_ANGLE_ORDER[currentIndex + 1] || null;
+  }
+
+  function advanceAngleIfNeeded() {
+    if (angleCounts[requiredAngle] < FACE_TARGET_PER_ANGLE) return;
+
+    const nextAngle = getNextRequiredAngle();
+    if (nextAngle) {
+      requiredAngle = nextAngle;
+      updateFaceGuidance();
+      setStatus(
+        `Angle completed. Now collect ${FACE_TARGET_PER_ANGLE} samples for ${requiredAngle.toUpperCase()}.`
+      );
+      return;
+    }
+
+    faceEnrollmentCompleted = true;
+    faceCaptureRunning = false;
+    updateFaceGuidance();
+    setStatus("Face enrollment completed successfully.");
+  }
+
+  function parsePoseCheckResult(result, currentRequiredAngle) {
+    const normalizedStatus = String(result?.status || "").trim().toUpperCase();
+    const normalizedReason = String(result?.reason || "").trim().toUpperCase();
+
+    const accepted =
+      result?.accepted === true ||
+      result?.ok === true ||
+      result?.passed === true ||
+      normalizedStatus === "OK" ||
+      normalizedStatus === "PASS" ||
+      normalizedStatus === "ACCEPTED" ||
+      normalizedReason === "OK";
+
+    return {
+      accepted,
+      reason:
+        result?.reason ||
+        result?.message ||
+        (accepted ? "OK" : `REQUIRE_${String(currentRequiredAngle).toUpperCase()}`),
+      detectedAngle:
+        result?.detected_angle ||
+        result?.angle ||
+        result?.pose ||
+        null,
+    };
+  }
+
+  async function validateFaceFrame(faceB64, currentRequiredAngle) {
+    const response = await apiIdentifyPoseCheck(faceB64, currentRequiredAngle);
+    return parsePoseCheckResult(response, currentRequiredAngle);
+  }
+
   function showFaceStep() {
     faceStepEl?.classList.remove("hidden");
     voiceStepEl?.classList.add("hidden");
@@ -297,8 +430,11 @@ export function initEnroll() {
     setText(stepTitleEl, "Face Enrollment");
     setText(
       stepDescriptionEl,
-      "Start the camera and collect face samples first."
+      "Collect 5 center, 5 left and 5 right face samples. Wrong angles will be rejected."
     );
+
+    updateFaceGuidance();
+    updateFaceProgress();
   }
 
   function showVoiceStep() {
@@ -333,7 +469,7 @@ export function initEnroll() {
 
   function updateStepButtons() {
     if (btnGoVoice) {
-      btnGoVoice.disabled = !faceEnrollmentCompleted;
+      btnGoVoice.disabled = !faceEnrollmentCompleted || faceCaptureRunning;
     }
 
     if (btnGoComplete) {
@@ -351,7 +487,12 @@ export function initEnroll() {
     }
 
     if (btnStartEnroll) {
-      btnStartEnroll.disabled = biometricSubmitCompleted;
+      btnStartEnroll.disabled =
+        biometricSubmitCompleted || faceCaptureRunning || faceEnrollmentCompleted;
+    }
+
+    if (btnStartCam) {
+      btnStartCam.disabled = faceCaptureRunning;
     }
   }
 
@@ -376,7 +517,12 @@ export function initEnroll() {
   btnStartEnroll?.addEventListener("click", async () => {
     try {
       if (faceEnrollmentCompleted) {
-        setStatus("Face samples already collected.");
+        setStatus("Face enrollment is already completed.");
+        return;
+      }
+
+      if (faceCaptureRunning) {
+        setStatus("Face enrollment is already running.");
         return;
       }
 
@@ -386,46 +532,74 @@ export function initEnroll() {
         return;
       }
 
-      setStatus("Collecting face samples...");
-      if (btnStartEnroll) btnStartEnroll.disabled = true;
-
-      faceSamples = [];
+      resetFaceEnrollmentState();
+      faceCaptureRunning = true;
       updateFaceProgress();
-
-      for (let i = 0; i < FACE_TARGET_SAMPLES; i += 1) {
-        const faceB64 = captureFrameBase64(videoEl, canvasEl);
-
-        if (faceB64) {
-          faceSamples.push(faceB64);
-          updateFaceProgress();
-        }
-
-        await sleep(220);
-      }
-
-      if (faceSamples.length < FACE_TARGET_SAMPLES) {
-        setStatus(
-          `Not enough face samples collected (${faceSamples.length}/${FACE_TARGET_SAMPLES}). Please try again.`
-        );
-        if (btnStartEnroll) btnStartEnroll.disabled = false;
-        return;
-      }
-
-      faceEnrollmentCompleted = true;
-      setStatus(
-        `Face samples completed (${faceSamples.length}/${FACE_TARGET_SAMPLES}).`
-      );
+      updateFaceGuidance();
       updateStepButtons();
 
-      setTimeout(() => {
-        showVoiceStep();
-      }, 250);
+      setStatus(
+        `Face enrollment started. Please look ${requiredAngle.toUpperCase()}.`
+      );
+
+      while (faceCaptureRunning && !faceEnrollmentCompleted) {
+        const currentRequiredAngle = requiredAngle;
+        const faceB64 = captureFrameBase64(videoEl, canvasEl);
+
+        if (!faceB64) {
+          setStatus("Frame capture failed. Trying again...");
+          await sleep(FACE_CAPTURE_INTERVAL_MS);
+          continue;
+        }
+
+        let poseResult;
+        try {
+          poseResult = await validateFaceFrame(faceB64, currentRequiredAngle);
+        } catch (e) {
+          console.error(e);
+          faceCaptureRunning = false;
+          setStatus(`Pose check failed: ${e.message || "UNKNOWN_ERROR"}`);
+          updateStepButtons();
+          return;
+        }
+
+        if (!poseResult.accepted) {
+          setStatus(
+            `Rejected frame for ${currentRequiredAngle.toUpperCase()}: ${poseResult.reason || "WRONG_POSE"}`
+          );
+          await sleep(FACE_CAPTURE_INTERVAL_MS);
+          continue;
+        }
+
+        faceSamplesByAngle[currentRequiredAngle].push({
+          image_b64: faceB64,
+          angle: currentRequiredAngle,
+        });
+        angleCounts[currentRequiredAngle] += 1;
+
+        updateFaceProgress();
+
+        setStatus(
+          `Accepted ${currentRequiredAngle.toUpperCase()} sample ${angleCounts[currentRequiredAngle]}/${FACE_TARGET_PER_ANGLE}`
+        );
+
+        advanceAngleIfNeeded();
+        updateStepButtons();
+
+        await sleep(FACE_CAPTURE_INTERVAL_MS);
+      }
+
+      if (faceEnrollmentCompleted) {
+        updateStepButtons();
+        setTimeout(() => {
+          showVoiceStep();
+        }, 250);
+      }
     } catch (e) {
       console.error(e);
+      faceCaptureRunning = false;
       setStatus(`Face collection error: ${e.message || "UNKNOWN_ERROR"}`);
-      if (!biometricSubmitCompleted && btnStartEnroll) {
-        btnStartEnroll.disabled = false;
-      }
+      updateStepButtons();
     }
   });
 
@@ -483,7 +657,7 @@ export function initEnroll() {
 
       voiceSamples.push({
         voice_wav_b64: b64,
-        challenge_answer_text: promptText,
+        prompt_text: promptText,
         transcript_text: speech?.transcript || "",
       });
 
@@ -546,6 +720,8 @@ export function initEnroll() {
   // ---------- Final submit ----------
   btnGoComplete?.addEventListener("click", async () => {
     try {
+      const faceSamples = getFlattenedFaceSamples();
+
       if (!faceEnrollmentCompleted) {
         setStatus("Complete face enrollment first.");
         return;
@@ -556,7 +732,7 @@ export function initEnroll() {
         return;
       }
 
-      if (!faceSamples.length || faceSamples.length < FACE_TARGET_SAMPLES) {
+      if (!faceSamples.length || faceSamples.length < FACE_TOTAL_TARGET) {
         setStatus("Face samples are missing.");
         return;
       }
@@ -601,8 +777,10 @@ export function initEnroll() {
 
   // ---------- Init ----------
   updateFaceProgress();
+  updateFaceGuidance();
   updateVoiceSampleProgress();
   updateVoicePrompt();
+
   setText(voiceTranscriptPreviewEl, "Waiting for phrase...");
   setStatus("Ready.");
   setVoiceStatus("Ready.");
@@ -610,6 +788,7 @@ export function initEnroll() {
   faceEnrollmentCompleted = false;
   voiceEnrollmentCompleted = false;
   biometricSubmitCompleted = false;
+  faceCaptureRunning = false;
 
   updateStepButtons();
   showFaceStep();

@@ -16,6 +16,7 @@ class UserRepo:
         await self.session.flush()
         return user
 
+
 class BiometricRepo:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -23,6 +24,21 @@ class BiometricRepo:
     async def add_feature(self, user_id: int, type_: str, enc_blob: bytes) -> None:
         row = BiometricData(user_id=user_id, type=type_, enc_feature_blob=enc_blob)
         self.session.add(row)
+
+    async def get_user_voice_template(self, user_id: int):
+        res = await self.session.execute(
+            select(BiometricData).where(
+                BiometricData.user_id == user_id,
+                BiometricData.type == "voice_feature"
+            )
+        )
+        return res.scalar_one_or_none()
+
+    async def get_all_voice_templates(self):
+        res = await self.session.execute(
+            select(BiometricData).where(BiometricData.type == "voice_feature")
+        )
+        return res.scalars().all()
 
 class AuditRepo:
     def __init__(self, session: AsyncSession):
