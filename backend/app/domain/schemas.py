@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 from pydantic import BaseModel, field_validator, model_validator
-from typing import Optional
+
 
 class VerifyRequest(BaseModel):
     face_image_b64: Optional[str] = None
@@ -145,3 +145,30 @@ class VoiceIdentifyResponse(BaseModel):
     passed: bool
     threshold: float
     reason: str
+
+
+# ==== Precheck (Duplicate) Modelleri ====
+from typing import Optional
+from pydantic import BaseModel
+
+class FacePrecheckRequest(BaseModel):
+    username: str
+    face_image_b64: str
+
+class FacePrecheckResponse(BaseModel):
+    duplicate: bool
+    reason: str
+    matched_username: Optional[str] = None
+    matched_user_id: Optional[int] = None
+    similarity: float = 0.0
+
+class VoicePrecheckRequest(BaseModel):
+    username: str
+    voice_wav_b64: str
+
+class VoicePrecheckResponse(BaseModel):
+    duplicate: bool
+    reason: str
+    matched_username: Optional[str] = None
+    matched_user_id: Optional[int] = None
+    similarity: float = 0.0

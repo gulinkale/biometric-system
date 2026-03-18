@@ -3,17 +3,27 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Dict, List
 
+import logging
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import User
+from app.db.models import User, BiometricData
 from app.db.session import get_session
 from app.services.authentication_service import AuthenticationService
 from app.utils.image_io import b64_to_bgr_image
 from app.utils.audio_io import b64_to_wav_mono
-from app.domain.schemas import BiometricEnrollRequest, BiometricEnrollResponse
+from app.domain.schemas import (
+    BiometricEnrollRequest,
+    BiometricEnrollResponse,
+    FacePrecheckRequest,
+    FacePrecheckResponse,
+    VoicePrecheckRequest,
+    VoicePrecheckResponse,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/enroll", tags=["enroll"])
 _auth_service = AuthenticationService()
@@ -33,6 +43,72 @@ async def _require_existing_user(session: AsyncSession, username: str) -> User:
 
 def _normalize_vector(vec: np.ndarray) -> np.ndarray:
     return vec / (np.linalg.norm(vec) + 1e-9)
+
+
+@router.post("/precheck/face", response_model=FacePrecheckResponse)
+async def precheck_face_duplicate(
+    req: FacePrecheckRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    username = (req.username or "").strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="USERNAME_EMPTY")
+
+    await _require_existing_user(session, username)
+
+    try:
+        img = b64_to_bgr_image(req.face_image_b64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="FACE_IMAGE_DECODE_ERROR")
+
+    if hasattr(_auth_service, "extract_face_embedding_and_pose"):
+        emb, *_ = _auth_service.extract_face_embedding_and_pose(img)
+    else:
+        emb = _auth_service.face.extract_embedding(img)
+
+    if emb is None:
+        return FacePrecheckResponse(
+            duplicate=False,
+            reason="FACE_EMBEDDING_FAILED",
+            matched_username=None,
+            matched_user_id=None,
+            similarity=0.0,
+        )
+
+    emb = _normalize_vector(np.asarray(emb, dtype=np.float32).reshape(-1))
+    result = await _auth_service.precheck_face_duplicate(session, username, emb)
+    return FacePrecheckResponse(**result)
+
+
+@router.post("/precheck/voice", response_model=VoicePrecheckResponse)
+async def precheck_voice_duplicate(
+    req: VoicePrecheckRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    username = (req.username or "").strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="USERNAME_EMPTY")
+
+    await _require_existing_user(session, username)
+
+    try:
+        audio, sr = b64_to_wav_mono(req.voice_wav_b64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="VOICE_AUDIO_DECODE_ERROR")
+
+    emb = _auth_service.voice.extract_embedding(audio, sr)
+    if emb is None:
+        return VoicePrecheckResponse(
+            duplicate=False,
+            reason="VOICE_EMBEDDING_FAILED",
+            matched_username=None,
+            matched_user_id=None,
+            similarity=0.0,
+        )
+
+    emb = _normalize_vector(np.asarray(emb, dtype=np.float32).reshape(-1))
+    result = await _auth_service.precheck_voice_duplicate(session, username, emb)
+    return VoicePrecheckResponse(**result)
 
 
 @router.post("/biometric", response_model=BiometricEnrollResponse)
@@ -57,18 +133,39 @@ async def enroll_biometric(
     if not voice_samples:
         return BiometricEnrollResponse(success=False, message="VOICE_SAMPLES_EMPTY")
 
-    await _require_existing_user(session, username)
+    user = await _require_existing_user(session, username)
+
+    has_face = False
+    for face_type in [
+        "face_feature_center",
+        "face_feature_left",
+        "face_feature_right",
+        "face_feature",
+    ]:
+        existing = await _auth_service._get_biometric_row(session, user.user_id, face_type)
+        if existing:
+            has_face = True
+            break
+
+    if has_face:
+        return BiometricEnrollResponse(
+            success=False,
+            message="USER_ALREADY_HAS_FACE_DATA",
+            user_id=user.user_id,
+            face_status="already_exists",
+            voice_status="not_processed",
+        )
 
     face_status = "not_processed"
     voice_status = "not_processed"
 
     # -------------------------------------------------
-    # FACE PROCESSING (pose-aware, angle grouped)
+    # FACE PROCESSING
     # -------------------------------------------------
     try:
         angle_embeddings: Dict[str, List[np.ndarray]] = defaultdict(list)
 
-        for sample in face_samples:
+        for idx, sample in enumerate(face_samples):
             image_b64 = sample.image_b64
             angle = sample.angle
 
@@ -83,10 +180,10 @@ async def enroll_biometric(
 
             img = b64_to_bgr_image(image_b64)
 
-            # Önce pose-aware extraction varsa onu kullan
             if hasattr(_auth_service, "extract_face_embedding_and_pose"):
                 emb, nose_x_ratio, yaw, bbox_size, blur_score = _auth_service.extract_face_embedding_and_pose(img)
                 detected_pose = _auth_service.bucket_pose_from_nose_ratio(nose_x_ratio)
+
                 if emb is None:
                     return BiometricEnrollResponse(
                         success=False,
@@ -96,7 +193,6 @@ async def enroll_biometric(
                         voice_status="not_processed",
                     )
 
-                # Eğer backend pose label da döndürüyorsa kontrol et
                 if detected_pose and detected_pose != angle:
                     return BiometricEnrollResponse(
                         success=False,
@@ -115,6 +211,62 @@ async def enroll_biometric(
                         face_status="failed",
                         voice_status="not_processed",
                     )
+
+            # Legacy safety check: first submitted face sample against DB
+            if idx == 0:
+                face_types = [
+                    "face_feature_center",
+                    "face_feature_left",
+                    "face_feature_right",
+                    "face_feature",
+                ]
+                result_all = await session.execute(
+                    select(BiometricData, User)
+                    .join(User, BiometricData.user_id == User.user_id)
+                    .where(
+                        BiometricData.type.in_(face_types),
+                        BiometricData.user_id != user.user_id,
+                    )
+                )
+
+                for other_face, other_user in result_all.all():
+                    other_vec = np.frombuffer(other_face.enc_feature_blob, dtype=np.float32)
+                    other_vec = _normalize_vector(other_vec)
+                    probe_vec = _normalize_vector(np.asarray(emb, dtype=np.float32).reshape(-1))
+                    sim = float(
+                        np.dot(probe_vec, other_vec)
+                        / ((np.linalg.norm(probe_vec) + 1e-8) * (np.linalg.norm(other_vec) + 1e-8))
+                    )
+
+                    print(
+                        f"[FIRST_FACE_SAMPLE_SIM] enrolling_user={user.username} "
+                        f"db_user={other_user.username} sim={sim:.4f}"
+                    )
+                    logger.info(
+                        "[FIRST_FACE_SAMPLE_SIM] enrolling_user=%s db_user=%s sim=%.4f",
+                        user.username,
+                        other_user.username,
+                        sim,
+                    )
+
+                    if sim >= 0.80:
+                        print(
+                            f"[FACE_MATCH_BLOCKED] enrolling_user={user.username} "
+                            f"matched_user={other_user.username} sim={sim:.4f}"
+                        )
+                        logger.warning(
+                            "[FACE_MATCH_BLOCKED] enrolling_user=%s matched_user=%s sim=%.4f",
+                            user.username,
+                            other_user.username,
+                            sim,
+                        )
+                        return BiometricEnrollResponse(
+                            success=False,
+                            message=f"FACE_ALREADY_REGISTERED_OTHER_USER:username={other_user.username},similarity={sim:.4f}",
+                            user_id=other_user.user_id,
+                            face_status="failed",
+                            voice_status="not_processed",
+                        )
 
             angle_embeddings[angle].append(emb)
 
@@ -192,10 +344,7 @@ async def enroll_biometric(
                     voice_status="failed",
                 )
 
-            # transcript_text burada sadece bilgi amaçlı tutuluyor;
-            # frontend approx doğrulama yapıyor.
             _ = transcript_text
-
             voice_embeddings.append(emb)
 
         if len(voice_embeddings) < REQUIRED_TOTAL_VOICE_SAMPLES:
@@ -226,7 +375,6 @@ async def enroll_biometric(
     # FINAL SAVE / COMMIT
     # -------------------------------------------------
     try:
-        # Eğer service içinde pose-aware save fonksiyonu varsa onu kullan
         if hasattr(_auth_service, "enroll_user_with_pose_templates") and hasattr(
             _auth_service, "save_voice_template_vector"
         ):
@@ -243,12 +391,27 @@ async def enroll_biometric(
             )
 
             if face_result.get("reason") == "USER_NOT_FOUND":
+                await session.rollback()
                 return BiometricEnrollResponse(
                     success=False,
                     message="USER_NOT_FOUND",
                     user_id=None,
                     face_status="failed",
                     voice_status="failed",
+                )
+
+            if face_result.get("status") == "FACE_ALREADY_REGISTERED_OTHER_USER":
+                await session.rollback()
+                return BiometricEnrollResponse(
+                    success=False,
+                    message=(
+                        "FACE_ALREADY_REGISTERED_OTHER_USER:"
+                        f"username={face_result.get('other_username')},"
+                        f"similarity={float(face_result.get('similarity', 0.0)):.4f}"
+                    ),
+                    user_id=face_result.get("other_user_id"),
+                    face_status="duplicate_face",
+                    voice_status="not_processed",
                 )
 
             voice_result = await _auth_service.save_voice_template_vector(
@@ -258,6 +421,7 @@ async def enroll_biometric(
             )
 
             if voice_result.get("reason") == "USER_NOT_FOUND":
+                await session.rollback()
                 return BiometricEnrollResponse(
                     success=False,
                     message="USER_NOT_FOUND",
@@ -266,21 +430,34 @@ async def enroll_biometric(
                     voice_status="failed",
                 )
 
+            if voice_result.get("status") == "VOICE_ALREADY_REGISTERED_OTHER_USER":
+                await session.rollback()
+                return BiometricEnrollResponse(
+                    success=False,
+                    message=(
+                        "VOICE_ALREADY_REGISTERED_OTHER_USER:"
+                        f"username={voice_result.get('other_username')},"
+                        f"similarity={float(voice_result.get('similarity', 0.0)):.4f}"
+                    ),
+                    user_id=voice_result.get("other_user_id"),
+                    face_status=face_status,
+                    voice_status="duplicate_voice",
+                )
+
             await session.commit()
 
             return BiometricEnrollResponse(
                 success=True,
                 message="Biometric enrollment completed",
-                user_id=None,
+                user_id=user.user_id,
                 face_status=face_status,
                 voice_status=voice_status,
             )
 
-        # Fallback: service save fonksiyonları henüz hazır değilse sadece processing başarılı dön
         return BiometricEnrollResponse(
             success=True,
             message="Biometric enrollment processed (save functions not fully integrated yet)",
-            user_id=None,
+            user_id=user.user_id,
             face_status=face_status,
             voice_status=voice_status,
         )

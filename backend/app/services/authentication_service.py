@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Optional
 
+import logging
 import numpy as np
 from sqlalchemy import select
-import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -14,6 +14,7 @@ from app.services.face_processor import FaceProcessor
 from app.services.fusion import fuse
 from app.services.voice_processor import VoiceProcessor, VoiceFeatures
 
+logger = logging.getLogger(__name__)
 
 FACE_TEMPLATE_TYPE_BY_POSE = {
     "center": "face_feature_center",
@@ -25,11 +26,125 @@ LEGACY_FACE_TEMPLATE_TYPE = "face_feature"
 
 class AuthenticationService:
 
-    def count_faces(self, face_img: np.ndarray) -> Optional[int]:
-        try:
-            return int(self.face.count_faces(face_img))
-        except Exception:
-            return None
+    async def precheck_face_duplicate(
+        self,
+        session: AsyncSession,
+        username: str,
+        face_vec: np.ndarray,
+    ) -> dict:
+        """
+        Sadece duplicate kontrolü yapar, DB'ye kayıt yapmaz.
+        """
+        user = await self._get_user_by_username(session, username)
+        if user is None:
+            return {
+                "duplicate": False,
+                "reason": "USER_NOT_FOUND",
+                "matched_username": None,
+                "matched_user_id": None,
+                "similarity": 0.0,
+            }
+
+        FACE_TYPES = [
+            "face_feature_center",
+            "face_feature_left",
+            "face_feature_right",
+            "face_feature",
+        ]
+        result_all = await session.execute(
+            select(BiometricData, User)
+            .join(User, BiometricData.user_id == User.user_id)
+            .where(
+                BiometricData.type.in_(FACE_TYPES),
+                BiometricData.user_id != user.user_id,
+            )
+        )
+        best_sim = 0.0
+        best_user = None
+        best_user_id = None
+        for other_face, other_user in result_all.all():
+            other_vec = np.frombuffer(other_face.enc_feature_blob, dtype=np.float32)
+            other_vec = self._l2norm(other_vec)
+            sim = self._cosine(self._l2norm(face_vec), other_vec)
+            logger.info(f"[PRECHECK_FACE_SIM] enrolling_user={user.username} db_user={other_user.username} sim={sim:.4f}")
+            if sim > best_sim:
+                best_sim = sim
+                best_user = other_user.username
+                best_user_id = other_user.user_id
+            if sim >= 0.80:
+                print(f"[PRECHECK_FACE_DUPLICATE] enrolling_user={user.username} matched_user={other_user.username} sim={sim:.4f}")
+                logger.warning(f"[PRECHECK_FACE_DUPLICATE] enrolling_user={user.username} matched_user={other_user.username} sim={sim:.4f}")
+                return {
+                    "duplicate": True,
+                    "reason": "FACE_ALREADY_REGISTERED_OTHER_USER",
+                    "matched_username": other_user.username,
+                    "matched_user_id": other_user.user_id,
+                    "similarity": float(sim),
+                }
+        return {
+            "duplicate": False,
+            "reason": "OK",
+            "matched_username": best_user,
+            "matched_user_id": best_user_id,
+            "similarity": float(best_sim),
+        }
+
+    async def precheck_voice_duplicate(
+        self,
+        session: AsyncSession,
+        username: str,
+        voice_vec: np.ndarray,
+    ) -> dict:
+        """
+        Sadece duplicate kontrolü yapar, DB'ye kayıt yapmaz.
+        """
+        user = await self._get_user_by_username(session, username)
+        if user is None:
+            return {
+                "duplicate": False,
+                "reason": "USER_NOT_FOUND",
+                "matched_username": None,
+                "matched_user_id": None,
+                "similarity": 0.0,
+            }
+
+        result_all = await session.execute(
+            select(BiometricData, User)
+            .join(User, BiometricData.user_id == User.user_id)
+            .where(
+                BiometricData.type == "voice_feature",
+                BiometricData.user_id != user.user_id,
+            )
+        )
+        best_sim = 0.0
+        best_user = None
+        best_user_id = None
+        for other_voice, other_user in result_all.all():
+            other_vec = np.frombuffer(other_voice.enc_feature_blob, dtype=np.float32)
+            other_vec = self._l2norm(other_vec)
+            sim = self._cosine(self._l2norm(voice_vec), other_vec)
+            logger.info(f"[PRECHECK_VOICE_SIM] enrolling_user={user.username} db_user={other_user.username} sim={sim:.4f}")
+            if sim > best_sim:
+                best_sim = sim
+                best_user = other_user.username
+                best_user_id = other_user.user_id
+            if sim >= 0.80:
+                print(f"[PRECHECK_VOICE_DUPLICATE] enrolling_user={user.username} matched_user={other_user.username} sim={sim:.4f}")
+                logger.warning(f"[PRECHECK_VOICE_DUPLICATE] enrolling_user={user.username} matched_user={other_user.username} sim={sim:.4f}")
+                return {
+                    "duplicate": True,
+                    "reason": "VOICE_ALREADY_REGISTERED_OTHER_USER",
+                    "matched_username": other_user.username,
+                    "matched_user_id": other_user.user_id,
+                    "similarity": float(sim),
+                }
+        return {
+            "duplicate": False,
+            "reason": "OK",
+            "matched_username": best_user,
+            "matched_user_id": best_user_id,
+            "similarity": float(best_sim),
+        }
 
     def __init__(self) -> None:
         self.face = FaceProcessor()
@@ -63,6 +178,12 @@ class AuthenticationService:
 
         denom = (np.linalg.norm(a) + 1e-8) * (np.linalg.norm(b) + 1e-8)
         return float(np.dot(a, b) / denom)
+
+    def count_faces(self, face_img: np.ndarray) -> Optional[int]:
+        try:
+            return int(self.face.count_faces(face_img))
+        except Exception:
+            return None
 
     def bucket_pose_from_nose_ratio(self, nose_x_ratio: Optional[float]) -> Optional[str]:
         if nose_x_ratio is None:
@@ -153,27 +274,30 @@ class AuthenticationService:
     def extract_face_embedding_and_pose(
         self,
         face_img: np.ndarray,
-    ):
+    ) -> tuple[
+        Optional[np.ndarray],
+        Optional[float],
+        Optional[float],
+        Optional[float],
+        Optional[float],
+    ]:
         """
-        embedding, nose_x_ratio, yaw, pitch, bbox_size, blur_score
-        """
-        """
-        embedding, nose_x_ratio, yaw, bbox_size, blur_score
+        Returns:
+            embedding, nose_x_ratio, yaw, bbox_size, blur_score
         """
         try:
             result = self.face.extract_embedding_and_pose(face_img)
             if result is None or len(result) < 5:
                 return (None,) * 5
+
             embedding, nose_x_ratio, yaw, bbox_size, blur_score = result
             if embedding is None or np.asarray(embedding).size == 0:
                 return (None,) * 5
+
             embedding = np.asarray(embedding, dtype=np.float32).reshape(-1)
             return self._l2norm(embedding), nose_x_ratio, yaw, bbox_size, blur_score
         except Exception:
             return (None,) * 5
-            return int(self.face.count_faces(face_img))
-        except Exception:
-            return None
 
     # =====================================================
     # Voice Embedding
@@ -189,7 +313,11 @@ class AuthenticationService:
 
             return self._l2norm(vec)
         except Exception as exc:
-            print(f"[VOICE_EMBEDDING_FAILED] {type(exc).__name__}: {exc}")
+            logger.warning(
+                "[VOICE_EMBEDDING_FAILED] %s: %s",
+                type(exc).__name__,
+                exc,
+            )
             return None
 
     # =====================================================
@@ -230,13 +358,13 @@ class AuthenticationService:
         pose_templates: dict[str, np.ndarray],
         n_samples_by_pose: dict[str, int],
     ) -> dict:
-        logging.warning("[ENROLL_FACE] fonksiyonuna girildi.")
-        user = await self._get_user_by_username(session, username)
+        print(f"[ENROLL_START] username={username}")
+        logger.info("[ENROLL_START] username=%s", username)
 
+        user = await self._get_user_by_username(session, username)
         if user is None:
             return {"status": "FAILED", "reason": "USER_NOT_FOUND"}
 
-        # Başka kullanıcıya ait yüz kontrolü
         for pose, vec in pose_templates.items():
             if vec is None:
                 continue
@@ -261,10 +389,31 @@ class AuthenticationService:
                 other_vec = np.frombuffer(other_face.enc_feature_blob, dtype=np.float32)
                 other_vec = self._l2norm(other_vec)
                 sim = self._cosine(normalized_vec, other_vec)
-                logging.warning(f"[FACE_SIM] pose={pose}, user={other_user.username}, sim={sim:.4f}")
+
+                print(
+                    f"[FACE_SIM] enrolling_user={user.username} "
+                    f"db_user={other_user.username} pose={pose} sim={sim:.4f}"
+                )
+                logger.info(
+                    "[FACE_SIM] enrolling_user=%s db_user=%s pose=%s sim=%.4f",
+                    user.username,
+                    other_user.username,
+                    pose,
+                    sim,
+                )
 
                 if sim >= 0.80:
-                    logging.warning(f"[FACE_MATCH] pose={pose}, user={other_user.username}, sim={sim:.4f} (eşik aşıldı)")
+                    print(
+                        f"[FACE_MATCH_BLOCKED] enrolling_user={user.username} "
+                        f"matched_user={other_user.username} pose={pose} sim={sim:.4f}"
+                    )
+                    logger.warning(
+                        "[FACE_MATCH_BLOCKED] enrolling_user=%s matched_user=%s pose=%s sim=%.4f",
+                        user.username,
+                        other_user.username,
+                        pose,
+                        sim,
+                    )
                     return {
                         "status": "FACE_ALREADY_REGISTERED_OTHER_USER",
                         "reason": f"This face is already registered to user: {other_user.username}",
@@ -276,6 +425,7 @@ class AuthenticationService:
 
         saved_poses: list[str] = []
 
+    # backward compatibility
         for pose, bio_type in FACE_TEMPLATE_TYPE_BY_POSE.items():
             vec = pose_templates.get(pose)
             if vec is None:
@@ -289,7 +439,6 @@ class AuthenticationService:
             )
             saved_poses.append(pose)
 
-        # backward compatibility
         legacy_center = pose_templates.get("center")
         if legacy_center is not None:
             await self._upsert_biometric_vector(
@@ -308,82 +457,6 @@ class AuthenticationService:
                 "left": int(n_samples_by_pose.get("left", 0)),
                 "right": int(n_samples_by_pose.get("right", 0)),
             },
-        }
-
-    async def enroll_user_with_template(
-        self,
-        session: AsyncSession,
-        username: str,
-        role: str,
-        face_template: np.ndarray,
-        n_samples: int,
-    ) -> dict:
-        user = await self._get_user_by_username(session, username)
-
-        if user is None:
-            return {"status": "FAILED", "reason": "USER_NOT_FOUND"}
-
-        vec = self._l2norm(face_template)
-        blob = vec.astype(np.float32).tobytes()
-
-        # Başka kullanıcıya ait generic yüz kontrolü
-        result_all = await session.execute(
-            select(BiometricData, User)
-            .join(User, BiometricData.user_id == User.user_id)
-            .where(
-                BiometricData.type == LEGACY_FACE_TEMPLATE_TYPE,
-                BiometricData.user_id != user.user_id,
-            )
-        )
-
-        for other_face, other_user in result_all.all():
-            other_vec = np.frombuffer(other_face.enc_feature_blob, dtype=np.float32)
-            other_vec = self._l2norm(other_vec)
-            sim = self._cosine(vec, other_vec)
-
-            if sim >= 0.95:
-                return {
-                    "status": "FACE_ALREADY_REGISTERED_OTHER_USER",
-                    "reason": f"This face is already registered to user: {other_user.username}",
-                    "similarity": float(sim),
-                    "other_user_id": other_user.user_id,
-                    "other_username": other_user.username,
-                    "n_samples": int(n_samples),
-                }
-
-        existing = await self._get_biometric_row(session, user.user_id, LEGACY_FACE_TEMPLATE_TYPE)
-
-        if existing:
-            old_vec = np.frombuffer(existing.enc_feature_blob, dtype=np.float32)
-            old_vec = self._l2norm(old_vec)
-            sim = self._cosine(vec, old_vec)
-
-            if sim >= 0.95:
-                return {
-                    "status": "FACE_ALREADY_REGISTERED",
-                    "similarity": float(sim),
-                    "n_samples": int(n_samples),
-                }
-
-            existing.enc_feature_blob = blob
-            return {
-                "status": "FACE_UPDATED",
-                "similarity": float(sim),
-                "n_samples": int(n_samples),
-            }
-
-        session.add(
-            BiometricData(
-                type=LEGACY_FACE_TEMPLATE_TYPE,
-                enc_feature_blob=blob,
-                user_id=user.user_id,
-            )
-        )
-
-        return {
-            "status": "ENROLLED",
-            "user_id": user.user_id,
-            "n_samples": int(n_samples),
         }
 
     # =====================================================
@@ -426,7 +499,6 @@ class AuthenticationService:
 
         blob = v.astype(np.float32).tobytes()
 
-        # Başka kullanıcıya ait ses kontrolü
         result_all = await session.execute(
             select(BiometricData, User)
             .join(User, BiometricData.user_id == User.user_id)
@@ -582,8 +654,6 @@ class AuthenticationService:
     # =====================================================
 
     async def identify_face(self, session: AsyncSession, face_img: np.ndarray) -> dict:
-
-        # Debug değişkenleri
         debug = {
             "yaw": None,
             "blur_score": None,
@@ -592,7 +662,6 @@ class AuthenticationService:
             "debug_step": None,
         }
 
-        # 1. Tek yüz var mı?
         face_count = self.count_faces(face_img)
         if face_count is not None and face_count > 1:
             debug["debug_step"] = "multiple_faces"
@@ -603,7 +672,6 @@ class AuthenticationService:
                 **debug,
             }
 
-        # 2. Embedding ve tüm pose/kalite çıktıları
         query_vec, nose_x_ratio, yaw, bbox_size, blur_score = self.extract_face_embedding_and_pose(face_img)
         debug.update({
             "yaw": yaw,
@@ -611,6 +679,7 @@ class AuthenticationService:
             "bbox_size": bbox_size,
             "nose_x_ratio": nose_x_ratio,
         })
+
         if query_vec is None:
             debug["debug_step"] = "embedding_failed"
             return {
@@ -620,8 +689,7 @@ class AuthenticationService:
                 **debug,
             }
 
-        # 3. Head pose: yaw aralıkta mı?
-        if yaw is None or abs(yaw) > 0.25:  # gevşetildi: ~14 derece
+        if yaw is None or abs(yaw) > 0.25:
             debug["debug_step"] = "yaw_out_of_range"
             return {
                 "identified": False,
@@ -630,7 +698,6 @@ class AuthenticationService:
                 **debug,
             }
 
-        # 4. Nose_x_ratio ortada mı? (yardımcı)
         if nose_x_ratio is None or nose_x_ratio < 0.44 or nose_x_ratio > 0.56:
             debug["debug_step"] = "not_frontal"
             return {
@@ -640,7 +707,6 @@ class AuthenticationService:
                 **debug,
             }
 
-        # 5. Gözler açık ve net mi?
         eyes_open, _eye_state = self.eye_state.are_eyes_open(face_img)
         if eyes_open is False:
             debug["debug_step"] = "eyes_closed"
@@ -659,8 +725,7 @@ class AuthenticationService:
                 **debug,
             }
 
-        # 6. Yüz yeterince büyük mü? (bbox_size yüksek olmalı, örneğin %4'ten küçükse çok uzak)
-        if bbox_size is None or bbox_size < 0.04:  # örnek: %4'ten küçükse çok uzak
+        if bbox_size is None or bbox_size < 0.04:
             debug["debug_step"] = "bbox_too_small"
             return {
                 "identified": False,
@@ -669,8 +734,7 @@ class AuthenticationService:
                 **debug,
             }
 
-        # 7. Yüz net mi? (blur score yüksek olmalı)
-        if blur_score is None or blur_score < 18.0:  # örnek eşik: 18
+        if blur_score is None or blur_score < 18.0:
             debug["debug_step"] = "face_blurry"
             return {
                 "identified": False,
@@ -679,7 +743,6 @@ class AuthenticationService:
                 **debug,
             }
 
-        # 8. Eşleşme
         best_score = -1.0
         best_user = None
 
@@ -826,4 +889,4 @@ class AuthenticationService:
         zcr_ok = 1.0 if 0.02 <= feats.zcr <= 0.2 else 0.6
 
         score = 0.45 * rms_ok + 0.30 * flat_ok + 0.25 * zcr_ok
-        return float(max(0.0, min(1.0, score)))
+        return float(max(0.0, min(1.0, score))) 
