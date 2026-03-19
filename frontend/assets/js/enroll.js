@@ -86,13 +86,18 @@ export function initEnroll() {
   const FACE_TOTAL_TARGET = FACE_TARGET_PER_ANGLE * FACE_ANGLE_ORDER.length;
   const FACE_CAPTURE_INTERVAL_MS = 450;
 
-  const VOICE_TARGET_SAMPLES = 5;
+  const VOICE_TARGET_SAMPLES = 10;
   const VOICE_PROMPTS = [
-    "Bugun biyometrik kayit islemi yapiyorum",
-    "Kameraya bakiyorum ve net konusuyorum",
-    "Ses ve yuz verilerim sisteme kaydedilecek",
-    "Bu sistem guvenli giris icin kullaniliyor",
-    "Kayit islemimi basariyla tamamlamak istiyorum",
+    "Bugun hava cok guzel",
+    "Sisteme guvenli sekilde giris yapiyorum",
+    "Kayit islemi icin hazirim",
+    "Mikrofona net ve duzgun konusuyorum",
+    "Biyometrik verilerim korunacak",
+    "Her ornekte ayni sekilde konusuyorum",
+    "Kayit islemi basariyla tamamlanacak",
+    "Bu sistem hizli ve kullanisli",
+    "Gizliligime onem veriyorum",
+    "Islem tamamlandiginda bilgilendirilecegim",
   ];
 
   let requiredAngle = FACE_ANGLE_ORDER[0];
