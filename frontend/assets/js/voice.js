@@ -1,23 +1,21 @@
 import { apiIdentifyVoice } from "./api.js";
-// Record voice, convert to base64, and identify user by voice (1:1)
-export async function recordAndIdentifyVoice(expected_user_id) {
-  // Start recording
+
+// Optional helper for direct 1:1 voice identification
+export async function recordAndIdentifyVoice(expected_user_id, recordMs = 3000) {
   await startVoiceRecording();
-  // Wait for user to finish (could be improved with UI integration)
-  // For now, stop after a fixed time (e.g., 2 seconds)
-  await new Promise((resolve) => setTimeout(resolve, 2000));
+  await new Promise((resolve) => setTimeout(resolve, recordMs));
   const { b64 } = await stopVoiceRecordingToBase64();
-  // Call API
   const result = await apiIdentifyVoice(b64, expected_user_id);
   return result;
 }
+
 let audioContext = null;
 let mediaStream = null;
 let sourceNode = null;
 let processorNode = null;
 
 let chunks = [];
-let sampleRate = 16000; // hedef
+let sampleRate = 16000; // target sample rate
 let isRecording = false;
 
 function downsampleBuffer(buffer, inRate, outRate) {
@@ -35,13 +33,13 @@ function downsampleBuffer(buffer, inRate, outRate) {
     let sum = 0;
     let count = 0;
 
-    for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+    for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i += 1) {
       sum += buffer[i];
-      count++;
+      count += 1;
     }
 
     result[offsetResult] = count > 0 ? sum / count : 0;
-    offsetResult++;
+    offsetResult += 1;
     offsetBuffer = nextOffsetBuffer;
   }
 
@@ -51,7 +49,7 @@ function downsampleBuffer(buffer, inRate, outRate) {
 function floatTo16BitPCM(float32) {
   const out = new Int16Array(float32.length);
 
-  for (let i = 0; i < float32.length; i++) {
+  for (let i = 0; i < float32.length; i += 1) {
     const s = Math.max(-1, Math.min(1, float32[i]));
     out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
   }
@@ -64,7 +62,7 @@ function encodeWav(int16, sr) {
   const view = new DataView(buffer);
 
   function writeString(offset, str) {
-    for (let i = 0; i < str.length; i++) {
+    for (let i = 0; i < str.length; i += 1) {
       view.setUint8(offset + i, str.charCodeAt(i));
     }
   }
@@ -73,18 +71,18 @@ function encodeWav(int16, sr) {
   view.setUint32(4, 36 + int16.length * 2, true);
   writeString(8, "WAVE");
   writeString(12, "fmt ");
-  view.setUint32(16, 16, true);     // PCM chunk size
-  view.setUint16(20, 1, true);      // PCM format
-  view.setUint16(22, 1, true);      // mono
+  view.setUint32(16, 16, true); // PCM chunk size
+  view.setUint16(20, 1, true); // PCM format
+  view.setUint16(22, 1, true); // mono
   view.setUint32(24, sr, true);
   view.setUint32(28, sr * 2, true); // byte rate
-  view.setUint16(32, 2, true);      // block align
-  view.setUint16(34, 16, true);     // bits per sample
+  view.setUint16(32, 2, true); // block align
+  view.setUint16(34, 16, true); // bits per sample
   writeString(36, "data");
   view.setUint32(40, int16.length * 2, true);
 
   let offset = 44;
-  for (let i = 0; i < int16.length; i++, offset += 2) {
+  for (let i = 0; i < int16.length; i += 1, offset += 2) {
     view.setInt16(offset, int16[i], true);
   }
 
@@ -112,7 +110,11 @@ export async function startVoiceRecording() {
   isRecording = true;
 
   mediaStream = await navigator.mediaDevices.getUserMedia({
-    audio: true,
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
     video: false,
   });
 
@@ -121,7 +123,7 @@ export async function startVoiceRecording() {
 
   sourceNode = audioContext.createMediaStreamSource(mediaStream);
 
-  // Demo / lightweight için ScriptProcessor yeterli
+  // Lightweight demo approach
   processorNode = audioContext.createScriptProcessor(4096, 1, 1);
 
   processorNode.onaudioprocess = (e) => {
@@ -178,8 +180,8 @@ export async function stopVoiceRecording() {
     offset += c.length;
   }
 
-  // çok kısa kayıtları engelle
-  const minSamples = sampleRate * 0.8; // en az 0.8 saniye
+  // minimum 1.5 seconds to avoid very weak embeddings
+  const minSamples = sampleRate * 1.5;
   if (merged.length < minSamples) {
     throw new Error("RECORDING_TOO_SHORT");
   }
@@ -196,7 +198,7 @@ export async function stopVoiceRecordingToBase64() {
   return { blob, b64 };
 }
 
-export async function recognizeSpeechOnce({ lang = "tr-TR", timeoutMs = 7000 } = {}) {
+export async function recognizeSpeechOnce({ lang = "tr-TR", timeoutMs = 10000 } = {}) {
   const SpeechRecognition =
     window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -224,8 +226,7 @@ export async function recognizeSpeechOnce({ lang = "tr-TR", timeoutMs = 7000 } =
     recognition.maxAlternatives = 1;
 
     recognition.onresult = (event) => {
-      const transcript =
-        event?.results?.[0]?.[0]?.transcript?.trim() || "";
+      const transcript = event?.results?.[0]?.[0]?.transcript?.trim() || "";
       if (!transcript) {
         finish(reject, new Error("SPEECH_EMPTY"));
         return;
@@ -234,7 +235,9 @@ export async function recognizeSpeechOnce({ lang = "tr-TR", timeoutMs = 7000 } =
     };
 
     recognition.onerror = (event) => {
-      const code = event?.error ? `SPEECH_${String(event.error).toUpperCase()}` : "SPEECH_ERROR";
+      const code = event?.error
+        ? `SPEECH_${String(event.error).toUpperCase()}`
+        : "SPEECH_ERROR";
       finish(reject, new Error(code));
     };
 

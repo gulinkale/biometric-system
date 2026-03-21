@@ -17,7 +17,7 @@ import {
 /**
  * Identify page flow:
  * Face capture -> /identify (1:N) -> user found
- * Voice record -> /auth/verify (face + voice)
+ * Voice/liveness sequence -> /auth/verify (face + voice)
  */
 export function initIdentify() {
   const MAX_VOICE_VERIFY_ATTEMPTS = 3;
@@ -72,13 +72,16 @@ export function initIdentify() {
   // --- state ---
   let faceB64 = null;
   let faceScore = 0;
-  let identifiedUser = null; // sadece bilgi amaçlı
+  let identifiedUser = null;
   let identifiedUserId = null;
   let isFaceStepPassed = false;
   let isVoiceAnswerPassed = false;
   let isVoiceRetryMode = false;
   let voiceVerifyAttempts = 0;
   let identifyChallengeId = null;
+  let identifyChallengePrompt = "";
+  let identifyChallengeExpectedKeywords = [];
+  let identifyChallengeExpectedNumbers = [];
   let challengeVoiceB64 = null;
   let livenessOrder = [];
   let livenessStepIndex = 0;
@@ -117,48 +120,59 @@ export function initIdentify() {
   }
 
   function setFlowDebug(step, status, reason = "-", score = "-") {
-    if (typeof step === 'object' && step !== null) {
-        const debug = step;
-        let similarityScore = debug.similarity !== undefined ? debug.similarity : debug.score;
-        if (flowDebugStepEl) setText(flowDebugStepEl, debug.debug_step || "-");
-        if (flowDebugStatusEl) setText(flowDebugStatusEl, debug.status || "-");
-        if (flowDebugReasonEl) setText(flowDebugReasonEl, debug.reason || "-");
-        // Score alanı için: 0.0 ise de göster
-        if (flowDebugScoreEl) {
-            if (similarityScore !== undefined && similarityScore !== null) {
-                flowDebugScoreEl.textContent = similarityScore;
-            } else {
-                flowDebugScoreEl.textContent = "0.0";
-            }
+    if (typeof step === "object" && step !== null) {
+      const debug = step;
+      const similarityScore = debug.similarity !== undefined ? debug.similarity : debug.score;
+
+      if (flowDebugStepEl) setText(flowDebugStepEl, debug.debug_step || "-");
+      if (flowDebugStatusEl) setText(flowDebugStatusEl, debug.status || "-");
+      if (flowDebugReasonEl) setText(flowDebugReasonEl, debug.reason || "-");
+
+      if (flowDebugScoreEl) {
+        if (similarityScore !== undefined && similarityScore !== null) {
+          flowDebugScoreEl.textContent = similarityScore;
+        } else {
+          flowDebugScoreEl.textContent = "0.0";
         }
-        // pitch kaldırıldı
-        if (byId('debugYaw')) setText(byId('debugYaw'), debug.yaw !== undefined ? debug.yaw : "-");
-        if (byId('debugBlur')) setText(byId('debugBlur'), debug.blur_score !== undefined ? debug.blur_score : "-");
-        if (byId('debugBBox')) setText(byId('debugBBox'), debug.bbox_size !== undefined ? debug.bbox_size : "-");
-        if (byId('debugNoseX')) setText(byId('debugNoseX'), debug.nose_x_ratio !== undefined ? debug.nose_x_ratio : "-");
-        flowDebugHistory.unshift(`${debug.debug_step || "-"} | ${debug.status || "-"} | ${debug.reason || "-"} | ${similarityScore !== undefined ? similarityScore : "0.0"}`);
-        flowDebugHistory = flowDebugHistory.slice(0, 8);
-        if (flowDebugHistoryEl) {
-            flowDebugHistoryEl.innerHTML = flowDebugHistory.join("<br>");
-        }
-        console.log(
-            `[FLOW] step=${debug.debug_step || "-"} status=${debug.status || "-"} reason=${debug.reason || "-"} score=${similarityScore !== undefined ? similarityScore : "0.0"}`
-        );
-        return;
+      }
+
+      if (byId("debugYaw")) setText(byId("debugYaw"), debug.yaw !== undefined ? debug.yaw : "-");
+      if (byId("debugBlur")) setText(byId("debugBlur"), debug.blur_score !== undefined ? debug.blur_score : "-");
+      if (byId("debugBBox")) setText(byId("debugBBox"), debug.bbox_size !== undefined ? debug.bbox_size : "-");
+      if (byId("debugNoseX")) setText(byId("debugNoseX"), debug.nose_x_ratio !== undefined ? debug.nose_x_ratio : "-");
+
+      flowDebugHistory.unshift(
+        `${debug.debug_step || "-"} | ${debug.status || "-"} | ${debug.reason || "-"} | ${
+          similarityScore !== undefined ? similarityScore : "0.0"
+        }`
+      );
+      flowDebugHistory = flowDebugHistory.slice(0, 8);
+
+      if (flowDebugHistoryEl) {
+        flowDebugHistoryEl.innerHTML = flowDebugHistory.join("<br>");
+      }
+
+      console.log(
+        `[FLOW] step=${debug.debug_step || "-"} status=${debug.status || "-"} reason=${
+          debug.reason || "-"
+        } score=${similarityScore !== undefined ? similarityScore : "0.0"}`
+      );
+      return;
     }
-    // Eski kullanım için
+
     if (flowDebugStepEl) setText(flowDebugStepEl, step || "-");
     if (flowDebugStatusEl) setText(flowDebugStatusEl, status || "-");
     if (flowDebugReasonEl) setText(flowDebugReasonEl, reason || "-");
     if (flowDebugScoreEl) setText(flowDebugScoreEl, score || "-");
+
     flowDebugHistory.unshift(`${step || "-"} | ${status || "-"} | ${reason || "-"} | ${score || "-"}`);
     flowDebugHistory = flowDebugHistory.slice(0, 8);
+
     if (flowDebugHistoryEl) {
       flowDebugHistoryEl.innerHTML = flowDebugHistory.join("<br>");
     }
-    console.log(
-      `[FLOW] step=${step || "-"} status=${status || "-"} reason=${reason || "-"} score=${score || "-"}`
-    );
+
+    console.log(`[FLOW] step=${step || "-"} status=${status || "-"} reason=${reason || "-"} score=${score || "-"}`);
   }
 
   function sleep(ms) {
@@ -166,7 +180,7 @@ export function initIdentify() {
   }
 
   function taskLabel(task) {
-    if (task === "answer") return "Challenge sorusuna cevap ver";
+    if (task === "answer") return "Ekrandaki cümleyi oku";
     if (task === "turn_right") return "Basini SAGA cevir ve kontrol et";
     if (task === "turn_left") return "Basini SOLA cevir ve kontrol et";
     if (task === "blink") return "Goz kirp ve kontrol et";
@@ -187,7 +201,6 @@ export function initIdentify() {
   }
 
   function initSequentialLivenessOrder() {
-    // Keep Step-1 fixed (face 1:N), randomize only liveness task order.
     livenessOrder = shuffledTasks(["answer", "turn_right", "turn_left", "blink"]);
     livenessStepIndex = 0;
     isVoiceAnswerPassed = false;
@@ -210,10 +223,13 @@ export function initIdentify() {
       setFlowDebug(flowStepName(currentTask()), "failed", "STEP_ORDER_MISMATCH");
       return false;
     }
+
     setFlowDebug(flowStepName(task), "passed", "OK");
+
     if (task === "answer") {
       isVoiceAnswerPassed = true;
     }
+
     livenessStepIndex += 1;
     updateLivenessUI();
     return true;
@@ -242,31 +258,14 @@ export function initIdentify() {
     if (btnRefreshIdentifyChallenge) btnRefreshIdentifyChallenge.disabled = task !== "answer";
     if (identifyChallengeAnswerEl) identifyChallengeAnswerEl.disabled = task !== "answer";
 
-    // Show only the control related to current step for a strict guided flow.
-    if (btnCaptureChallengeAnswer) {
-      btnCaptureChallengeAnswer.style.display = task === "answer" ? "" : "none";
-    }
-    if (btnRefreshIdentifyChallenge) {
-      btnRefreshIdentifyChallenge.style.display = task === "answer" ? "" : "none";
-    }
-    if (identifyChallengeAnswerEl) {
-      identifyChallengeAnswerEl.style.display = task === "answer" ? "" : "none";
-    }
-    if (identifyChallengePromptEl) {
-      identifyChallengePromptEl.style.display = task === "answer" ? "" : "none";
-    }
-    if (btnCheckTurnRight) {
-      btnCheckTurnRight.style.display = task === "turn_right" ? "" : "none";
-    }
-    if (btnCheckTurnLeft) {
-      btnCheckTurnLeft.style.display = task === "turn_left" ? "" : "none";
-    }
-    if (btnCheckBlink) {
-      btnCheckBlink.style.display = task === "blink" ? "" : "none";
-    }
-    if (btnLivenessContinue) {
-      btnLivenessContinue.style.display = finished ? "" : "none";
-    }
+    if (btnCaptureChallengeAnswer) btnCaptureChallengeAnswer.style.display = task === "answer" ? "" : "none";
+    if (btnRefreshIdentifyChallenge) btnRefreshIdentifyChallenge.style.display = task === "answer" ? "" : "none";
+    if (identifyChallengeAnswerEl) identifyChallengeAnswerEl.style.display = task === "answer" ? "" : "none";
+    if (identifyChallengePromptEl) identifyChallengePromptEl.style.display = task === "answer" ? "" : "none";
+    if (btnCheckTurnRight) btnCheckTurnRight.style.display = task === "turn_right" ? "" : "none";
+    if (btnCheckTurnLeft) btnCheckTurnLeft.style.display = task === "turn_left" ? "" : "none";
+    if (btnCheckBlink) btnCheckBlink.style.display = task === "blink" ? "" : "none";
+    if (btnLivenessContinue) btnLivenessContinue.style.display = finished ? "" : "none";
 
     if (finished) {
       if (isVoiceRetryMode) {
@@ -280,10 +279,7 @@ export function initIdentify() {
     }
 
     setFlowDebug(flowStepName(task), "waiting", "USER_ACTION_REQUIRED");
-
-    setLivenessStatus(
-      `Adim ${livenessStepIndex + 1}/${livenessOrder.length}: ${taskLabel(task)}`
-    );
+    setLivenessStatus(`Adim ${livenessStepIndex + 1}/${livenessOrder.length}: ${taskLabel(task)}`);
   }
 
   async function captureBurstFrames({ count = 10, intervalMs = 90 } = {}) {
@@ -311,12 +307,12 @@ export function initIdentify() {
 
     setFlowDebug("done", "failed", `${reason}_ATTEMPT_${voiceVerifyAttempts}`, voiceScore);
 
-    // Show score box
     const scoreBox = document.getElementById("voiceVerifyScoreBox");
     const vvFace = document.getElementById("vvFaceScore");
     const vvVoice = document.getElementById("vvVoiceScore");
     const vvFusion = document.getElementById("vvFusionScore");
     const vvReason = document.getElementById("vvReason");
+
     if (scoreBox) scoreBox.style.display = "";
     if (vvFace) setText(vvFace, faceScoreVal);
     if (vvVoice) setText(vvVoice, voiceScore);
@@ -332,23 +328,32 @@ export function initIdentify() {
 
     challengeVoiceB64 = null;
     isVoiceAnswerPassed = false;
+
     setLivenessStatus(
-      `Ses eslesmesi basarisiz. Skor: ${voiceScore} / esik: 0.88. Kalan hak: ${remaining}. Sadece voice challenge adimini tekrar yapin.`
+      `Ses eslesmesi basarisiz. Skor: ${voiceScore}. Kalan hak: ${remaining}. Voice challenge adimini tekrar yapin.`
     );
+
     await loadIdentifyChallenge({ voiceRetryOnly: true });
   }
 
   async function loadIdentifyChallenge({ voiceRetryOnly = false } = {}) {
     try {
       const ch = await apiIdentifyVoiceChallenge();
+
       identifyChallengeId = ch?.challenge_id || null;
-      setText(
-        identifyChallengePromptEl,
-        ch?.prompt || "Please answer the displayed question."
-      );
-      if (identifyChallengeAnswerEl) identifyChallengeAnswerEl.value = "";
+      identifyChallengePrompt = ch?.prompt || "Lutfen ekrandaki cumleyi okuyun.";
+      identifyChallengeExpectedKeywords = Array.isArray(ch?.expected_keywords) ? ch.expected_keywords : [];
+      identifyChallengeExpectedNumbers = Array.isArray(ch?.expected_numbers) ? ch.expected_numbers : [];
+
+      setText(identifyChallengePromptEl, identifyChallengePrompt);
+
+      if (identifyChallengeAnswerEl) {
+        identifyChallengeAnswerEl.value = "";
+      }
+
       challengeVoiceB64 = null;
       isVoiceAnswerPassed = false;
+
       if (voiceRetryOnly) {
         initVoiceRetryOrder();
       } else {
@@ -357,6 +362,9 @@ export function initIdentify() {
     } catch (e) {
       console.error(e);
       identifyChallengeId = null;
+      identifyChallengePrompt = "";
+      identifyChallengeExpectedKeywords = [];
+      identifyChallengeExpectedNumbers = [];
       setText(identifyChallengePromptEl, "Challenge unavailable.");
       setLivenessStatus("Challenge load failed.");
     }
@@ -400,11 +408,10 @@ export function initIdentify() {
 
       if (!idRes?.identified) {
         identifiedUser = null;
-        // Debug flow kutusuna tüm debug alanlarını yazdır
         setFlowDebug(idRes);
 
-        // Eski status mesajlarını koru
         const reason = (idRes?.reason || "").toUpperCase();
+
         if (reason === "EYES_CLOSED") {
           setFaceStatus("Eyes look closed. Please keep your eyes open and try again.");
           return;
@@ -437,19 +444,17 @@ export function initIdentify() {
       identifiedUser = idRes.username || `user_id=${idRes.user_id}`;
       identifiedUserId = Number(idRes.user_id ?? 0) || null;
       faceScore = Number(idRes.similarity ?? 0);
-      setFaceStatus(
-        `Identified: ${identifiedUser} (score ${faceScore.toFixed(3)})`
-      );
+
+      setFaceStatus(`Identified: ${identifiedUser} (score ${faceScore.toFixed(3)})`);
       setFlowDebug("face_front", "passed", "IDENTIFIED", faceScore.toFixed(3));
+
       isFaceStepPassed = true;
       voiceVerifyAttempts = 0;
 
-      // Face tamam -> Liveness challenge step
       showStep("step-liveness");
       await startCamera(livenessVideoEl);
       await loadIdentifyChallenge();
 
-      // Show identified user banner
       if (identifiedUserName) setText(identifiedUserName, identifiedUser);
       if (identifiedUserBanner) identifiedUserBanner.style.display = "block";
     } catch (e) {
@@ -469,22 +474,30 @@ export function initIdentify() {
         setFlowDebug("face_front", "failed", "FACE_STEP_REQUIRED");
         return;
       }
+
       if (currentTask() !== "answer") {
         setLivenessStatus(`Sira hatasi. Simdi yapman gereken: ${taskLabel(currentTask())}`);
         setFlowDebug(flowStepName(currentTask()), "failed", "STEP_ORDER_MISMATCH");
         return;
       }
 
+      if (!identifyChallengeId) {
+        setLivenessStatus("Challenge not ready.");
+        setFlowDebug("voice_answer", "failed", "CHALLENGE_NOT_READY");
+        return;
+      }
+
       if (btnCaptureChallengeAnswer) btnCaptureChallengeAnswer.disabled = true;
+
       let answerText = (identifyChallengeAnswerEl?.value || "").trim();
       const startedAt = Date.now();
-      const minRecordMs = 1200;
+      const minRecordMs = 1800;
 
-      setLivenessStatus("Challenge cevabi dinleniyor ve ses kimligi icin kaydediliyor...");
+      setLivenessStatus("Challenge cumlesi dinleniyor ve ses kimligi icin kaydediliyor...");
       await startVoiceRecording();
 
       if (!answerText) {
-        answerText = await recognizeSpeechOnce({ lang: "tr-TR", timeoutMs: 8000 });
+        answerText = await recognizeSpeechOnce({ lang: "tr-TR", timeoutMs: 10000 });
         if (identifyChallengeAnswerEl) identifyChallengeAnswerEl.value = answerText;
       }
 
@@ -496,42 +509,65 @@ export function initIdentify() {
       const { b64 } = await stopVoiceRecordingToBase64();
       challengeVoiceB64 = b64;
 
-      const v = await apiValidateIdentifyVoiceChallenge(identifyChallengeId, answerText);
+      const v = await apiValidateIdentifyVoiceChallenge({
+        challenge_id: identifyChallengeId,
+        answer_text: answerText,
+        expected_keywords: identifyChallengeExpectedKeywords,
+        expected_numbers: identifyChallengeExpectedNumbers,
+      });
+
       if (!v?.passed) {
         isVoiceAnswerPassed = false;
         challengeVoiceB64 = null;
-        setLivenessStatus("Challenge cevabi gecersiz. Tekrar deneyin.");
-        setFlowDebug("voice_answer", "failed", "INVALID_CHALLENGE_ANSWER");
+
+        const reason = String(v?.reason || "CHALLENGE_ANSWER_INVALID").toUpperCase();
+
+        if (reason === "TOO_SHORT") {
+          setLivenessStatus("Cumle cok kisa algilandi. Ekrandaki cumleyi tam ve net sekilde tekrar okuyun.");
+        } else {
+          setLivenessStatus("Challenge cevabi gecersiz. Ekrandaki cumleyi tekrar okuyun.");
+        }
+
+        setFlowDebug(
+          "voice_answer",
+          "failed",
+          reason,
+          `${v?.total_hits ?? 0}/${v?.total_expected ?? 0}`
+        );
         return;
       }
 
-      setLivenessStatus(`Soru cevabi kabul edildi: ${answerText}. Ses kimligi on-izlemesi hesaplaniyor...`);
+      setLivenessStatus(`Challenge cevabi kabul edildi. Ses kimligi on-izlemesi hesaplaniyor...`);
       stepDone("answer");
 
-      // Background voice similarity preview — does not block the flow
       try {
         const previewRes = await apiAuthVerify({
           face_image_b64: faceB64,
           voice_wav_b64: challengeVoiceB64,
         });
+
         const previewScore = (previewRes?.voice_score ?? 0).toFixed(3);
-        const previewFace  = (previewRes?.face_score  ?? 0).toFixed(3);
+        const previewFace = (previewRes?.face_score ?? 0).toFixed(3);
+
         setFlowDebug(
           "voice_preview",
           previewRes?.decision === "ACCEPTED" || previewRes?.decision === "GRANTED" ? "passed" : "info",
-          `SES_BENZERLIGI: ${previewScore} / esik:0.88 | YUZ: ${previewFace}`,
+          `SES_BENZERLIGI: ${previewScore} | YUZ: ${previewFace}`,
           previewScore
         );
-        setLivenessStatus(`Soru kabul edildi. Ses benzerlik on-izlemesi: ${previewScore} (esik: 0.88). Sonraki adima gec.`);
+
+        setLivenessStatus(
+          `Challenge kabul edildi. Ses benzerlik on-izlemesi: ${previewScore}. Sonraki adima gec.`
+        );
       } catch (_previewErr) {
-        // preview failure is non-fatal
-        setLivenessStatus(`Soru cevabi kabul edildi: ${answerText}. Sonraki adima gec.`);
+        setLivenessStatus("Challenge cevabi kabul edildi. Sonraki adima gec.");
       }
     } catch (e) {
       console.error(e);
       try {
         await stopVoiceRecordingToBase64();
       } catch {}
+
       isVoiceAnswerPassed = false;
       challengeVoiceB64 = null;
       setLivenessStatus(`Speech capture failed: ${e.message || "UNKNOWN_ERROR"}`);
@@ -543,10 +579,11 @@ export function initIdentify() {
 
   btnRefreshIdentifyChallenge?.addEventListener("click", async () => {
     if (currentTask() !== "answer") {
-      setLivenessStatus("Yeni soru sadece challenge adiminda alinabilir.");
+      setLivenessStatus("Yeni challenge sadece voice challenge adiminda alinabilir.");
       setFlowDebug(flowStepName(currentTask()), "failed", "INVALID_REFRESH_STEP");
       return;
     }
+
     await loadIdentifyChallenge({ voiceRetryOnly: livenessOrder.length === 1 });
   });
 
@@ -561,30 +598,50 @@ export function initIdentify() {
         setFlowDebug("turn_right", "failed", "FACE_STEP_REQUIRED");
         return;
       }
+
       if (currentTask() !== "turn_right") {
         setLivenessStatus(`Sira hatasi. Simdi yapman gereken: ${taskLabel(currentTask())}`);
         setFlowDebug(flowStepName(currentTask()), "failed", "STEP_ORDER_MISMATCH");
         return;
       }
+
       const frame = captureFrameBase64(getCaptureVideoEl(), canvasEl);
       if (!frame) {
         setLivenessStatus("Start camera first.");
         setFlowDebug("turn_right", "failed", "NO_FACE_FRAME");
         return;
       }
+
       const res = await apiIdentifyPoseCheck(frame, "right", faceB64, identifiedUserId);
       if (!res?.passed) {
-        const reason = res?.reason || ((res?.detected_turn || "none") === "none" ? "POSE_NOT_RIGHT" : `DETECTED_${String(res?.detected_turn || "none").toUpperCase()}`);
+        const reason =
+          res?.reason ||
+          ((res?.detected_turn || "none") === "none"
+            ? "POSE_NOT_RIGHT"
+            : `DETECTED_${String(res?.detected_turn || "none").toUpperCase()}`);
+
         if (String(reason).toUpperCase() === "POSE_NOT_ENOUGH_TURN") {
           setLivenessStatus("RIGHT turn yetersiz. Basini biraz daha saga cevirip tekrar dene.");
         } else {
           setLivenessStatus(`RIGHT turn failed (${reason}, detected: ${res?.detected_turn || "none"}).`);
         }
-        setFlowDebug("turn_right", "failed", reason, res?.similarity != null ? Number(res.similarity).toFixed(3) : "-");
+
+        setFlowDebug(
+          "turn_right",
+          "failed",
+          reason,
+          res?.similarity != null ? Number(res.similarity).toFixed(3) : "-"
+        );
         return;
       }
+
       setLivenessStatus("RIGHT turn check passed.");
-      setFlowDebug("turn_right", "passed", "OK", res?.similarity != null ? Number(res.similarity).toFixed(3) : "-");
+      setFlowDebug(
+        "turn_right",
+        "passed",
+        "OK",
+        res?.similarity != null ? Number(res.similarity).toFixed(3) : "-"
+      );
       stepDone("turn_right");
     } catch (e) {
       console.error(e);
@@ -600,30 +657,50 @@ export function initIdentify() {
         setFlowDebug("turn_left", "failed", "FACE_STEP_REQUIRED");
         return;
       }
+
       if (currentTask() !== "turn_left") {
         setLivenessStatus(`Sira hatasi. Simdi yapman gereken: ${taskLabel(currentTask())}`);
         setFlowDebug(flowStepName(currentTask()), "failed", "STEP_ORDER_MISMATCH");
         return;
       }
+
       const frame = captureFrameBase64(getCaptureVideoEl(), canvasEl);
       if (!frame) {
         setLivenessStatus("Start camera first.");
         setFlowDebug("turn_left", "failed", "NO_FACE_FRAME");
         return;
       }
+
       const res = await apiIdentifyPoseCheck(frame, "left", faceB64, identifiedUserId);
       if (!res?.passed) {
-        const reason = res?.reason || ((res?.detected_turn || "none") === "none" ? "POSE_NOT_LEFT" : `DETECTED_${String(res?.detected_turn || "none").toUpperCase()}`);
+        const reason =
+          res?.reason ||
+          ((res?.detected_turn || "none") === "none"
+            ? "POSE_NOT_LEFT"
+            : `DETECTED_${String(res?.detected_turn || "none").toUpperCase()}`);
+
         if (String(reason).toUpperCase() === "POSE_NOT_ENOUGH_TURN") {
           setLivenessStatus("LEFT turn yetersiz. Basini biraz daha sola cevirip tekrar dene.");
         } else {
           setLivenessStatus(`LEFT turn failed (${reason}, detected: ${res?.detected_turn || "none"}).`);
         }
-        setFlowDebug("turn_left", "failed", reason, res?.similarity != null ? Number(res.similarity).toFixed(3) : "-");
+
+        setFlowDebug(
+          "turn_left",
+          "failed",
+          reason,
+          res?.similarity != null ? Number(res.similarity).toFixed(3) : "-"
+        );
         return;
       }
+
       setLivenessStatus("LEFT turn check passed.");
-      setFlowDebug("turn_left", "passed", "OK", res?.similarity != null ? Number(res.similarity).toFixed(3) : "-");
+      setFlowDebug(
+        "turn_left",
+        "passed",
+        "OK",
+        res?.similarity != null ? Number(res.similarity).toFixed(3) : "-"
+      );
       stepDone("turn_left");
     } catch (e) {
       console.error(e);
@@ -639,6 +716,7 @@ export function initIdentify() {
         setFlowDebug("blink", "failed", "FACE_STEP_REQUIRED");
         return;
       }
+
       if (currentTask() !== "blink") {
         setLivenessStatus(`Sira hatasi. Simdi yapman gereken: ${taskLabel(currentTask())}`);
         setFlowDebug(flowStepName(currentTask()), "failed", "STEP_ORDER_MISMATCH");
@@ -646,7 +724,8 @@ export function initIdentify() {
       }
 
       setLivenessStatus("Blink kontrolu icin kisa video aliniyor... Lutfen bir kez goz kirpin.");
-      const frames = await captureBurstFrames({ count: 12, intervalMs: 90 });
+      const frames = await captureBurstFrames({ count: 20, intervalMs: 70 });
+
       if (frames.length < 6) {
         setLivenessStatus("Blink kontrolu icin yeterli frame alinamadi.");
         setFlowDebug("blink", "failed", "INSUFFICIENT_FRAMES");
@@ -656,17 +735,29 @@ export function initIdentify() {
       const res = await apiIdentifyBlinkCheck(frames, faceB64, identifiedUserId);
       if (!res?.passed) {
         const reason = String(res?.reason || "BLINK_NOT_DETECTED").toUpperCase();
+
         if (reason === "BLINK_NOT_DETECTED") {
           setLivenessStatus("Blink algilanamadi. Gozlerinizi bir kez belirgin sekilde kirpip tekrar deneyin.");
         } else {
           setLivenessStatus(`Blink check failed (${reason}).`);
         }
-        setFlowDebug("blink", "failed", reason, res?.drop_ratio != null ? Number(res.drop_ratio).toFixed(3) : "-");
+
+        setFlowDebug(
+          "blink",
+          "failed",
+          reason,
+          res?.drop_ratio != null ? Number(res.drop_ratio).toFixed(3) : "-"
+        );
         return;
       }
 
       setLivenessStatus("BLINK check passed.");
-      setFlowDebug("blink", "passed", "OK", res?.drop_ratio != null ? Number(res.drop_ratio).toFixed(3) : "-");
+      setFlowDebug(
+        "blink",
+        "passed",
+        "OK",
+        res?.drop_ratio != null ? Number(res.drop_ratio).toFixed(3) : "-"
+      );
       stepDone("blink");
     } catch (e) {
       console.error(e);
@@ -682,16 +773,19 @@ export function initIdentify() {
         setFlowDebug("done", "failed", "FACE_STEP_REQUIRED");
         return;
       }
+
       if (!isVoiceAnswerPassed) {
         setLivenessStatus("Voice challenge adimi basarisiz. Once challenge cevabini tekrar tamamlayin.");
         setFlowDebug("done", "failed", "VOICE_STEP_REQUIRED");
         return;
       }
+
       if (!identifyChallengeId) {
         setLivenessStatus("Challenge not ready.");
         setFlowDebug("done", "failed", "CHALLENGE_NOT_READY");
         return;
       }
+
       if (currentTask()) {
         setLivenessStatus(`Once su adimi tamamla: ${taskLabel(currentTask())}`);
         setFlowDebug(flowStepName(currentTask()), "failed", "STEP_NOT_COMPLETED");
@@ -713,7 +807,6 @@ export function initIdentify() {
 
       const decision = String(res.decision || "").toUpperCase();
       const reason = String(res.reason || "UNKNOWN").toUpperCase();
-      const voiceScore = (res.voice_score ?? 0).toFixed(3);
 
       if (decision !== "ACCEPTED" && decision !== "GRANTED" && isVoiceRelatedFailure(reason)) {
         await handleVoiceVerifyFailure(reason, res);
@@ -725,18 +818,21 @@ export function initIdentify() {
       setText(voiceScoreEl, (res.voice_score ?? 0).toFixed(3));
       setText(fusionScoreEl, (res.fusion_score ?? 0).toFixed(3));
       setStatus(res.reason || "DONE");
+
       setFlowDebug(
         "done",
         res.decision === "ACCEPTED" || res.decision === "GRANTED" ? "passed" : "failed",
         res.reason || "DONE",
         (res.fusion_score ?? 0).toFixed(3)
       );
+
       showStep("step-result");
 
       if (res.decision === "ACCEPTED" || res.decision === "GRANTED") {
         voiceVerifyAttempts = 0;
         const confirmedUser = res.identified_user || identifiedUser || "User";
         localStorage.setItem("portalUsername", confirmedUser);
+
         setTimeout(() => {
           window.location.href = "../portal/dashboard_portal.html";
         }, 2000);
@@ -753,6 +849,7 @@ export function initIdentify() {
   // -----------------------
   function restart() {
     stopCamera([videoEl, livenessVideoEl]);
+
     faceB64 = null;
     faceScore = 0;
     identifiedUser = null;
@@ -762,12 +859,16 @@ export function initIdentify() {
     isVoiceRetryMode = false;
     voiceVerifyAttempts = 0;
     identifyChallengeId = null;
+    identifyChallengePrompt = "";
+    identifyChallengeExpectedKeywords = [];
+    identifyChallengeExpectedNumbers = [];
     challengeVoiceB64 = null;
-    const scoreBox = document.getElementById("voiceVerifyScoreBox");
-    if (scoreBox) scoreBox.style.display = "none";
     livenessOrder = [];
     livenessStepIndex = 0;
     flowDebugHistory = [];
+
+    const scoreBox = document.getElementById("voiceVerifyScoreBox");
+    if (scoreBox) scoreBox.style.display = "none";
 
     setFaceStatus("");
     setLivenessStatus("");
@@ -795,7 +896,6 @@ export function initIdentify() {
   btnRestartResult?.addEventListener("click", restart);
   window.restartVerify = restart;
 
-  // If browser restores this page from bfcache/history, clear stale verification state.
   window.addEventListener("pageshow", (event) => {
     if (event.persisted) {
       restart();

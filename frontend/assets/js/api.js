@@ -83,11 +83,21 @@ export function apiIdentifyVoiceChallenge() {
   });
 }
 
-export function apiValidateIdentifyVoiceChallenge(challenge_id, answer_text) {
+export function apiValidateIdentifyVoiceChallenge({
+  challenge_id,
+  answer_text,
+  expected_keywords = [],
+  expected_numbers = [],
+}) {
   return jsonFetch("/identify/voice-challenge/validate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ challenge_id, answer_text }),
+    body: JSON.stringify({
+      challenge_id,
+      answer_text,
+      expected_keywords,
+      expected_numbers,
+    }),
   });
 }
 
