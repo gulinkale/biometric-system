@@ -1,3 +1,4 @@
+from __future__ import annotations
 
 import random
 import re
@@ -11,14 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.session import get_session
 from app.services.authentication_service import AuthenticationService
+from app.utils.audio_io import b64_to_wav_mono
 from app.utils.image_io import b64_to_bgr_image
 
 router = APIRouter(prefix="/identify", tags=["identify"])
 
 _auth_service = AuthenticationService()
 
-# --- Response Models ---
-from pydantic import BaseModel
+
 class IdentifyFaceResponse(BaseModel):
     identified: bool
     user_id: Optional[int] = None
@@ -32,10 +33,10 @@ class IdentifyFaceResponse(BaseModel):
     debug_step: Optional[str] = None
 
 
-
 class VoiceIdentifyRequest(BaseModel):
     voice_b64: str
     expected_user_id: int
+
 
 class VoiceIdentifyResponse(BaseModel):
     identified: bool
@@ -45,39 +46,23 @@ class VoiceIdentifyResponse(BaseModel):
     threshold: float
     reason: str
 
+
 class IdentifyRequest(BaseModel):
     face_image_b64: str
-from app.utils.audio_io import b64_to_wav_mono
-
-# Ses biyometrik kimlik doğrulama endpoint'i
-@router.post("/voice", response_model=VoiceIdentifyResponse)
-async def identify_voice(
-    req: VoiceIdentifyRequest,
-    session: AsyncSession = Depends(get_session),
-):
-    try:
-        audio, sr = b64_to_wav_mono(req.voice_b64)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"INVALID_AUDIO: {e}")
-
-    # 1:1 voice identification (expected_user_id zorunlu)
-    result = await _auth_service.identify_user_by_voice(
-        session=session,
-        audio=audio,
-        sr=sr,
-        expected_user_id=req.expected_user_id,
-    )
-    return result
 
 
 class VoiceChallengeResponse(BaseModel):
     challenge_id: str
     prompt: str
+    expected_keywords: Optional[list[str]] = None
+    expected_numbers: Optional[list[str]] = None
 
 
 class VoiceChallengeValidateRequest(BaseModel):
     challenge_id: str
     answer_text: str
+    expected_keywords: Optional[list[str]] = None
+    expected_numbers: Optional[list[str]] = None
 
 
 class PoseCheckRequest(BaseModel):
@@ -94,60 +79,114 @@ class BlinkCheckRequest(BaseModel):
     expected_user_id: Optional[int] = None
 
 
-IDENTIFY_CHALLENGES = [
-    {
-        "id": "id-weekday",
-        "prompt": "Soru: Bugun gunlerden ne?",
-    },
-    {
-        "id": "id-month",
-        "prompt": "Soru: Su an hangi aydayiz?",
-    },
-    {
-        "id": "id-number",
-        "prompt": "Soru: 7 artı 5 kac eder?",
-        "keywords": ["12", "on iki", "onik"],
-    },
-]
-
-
 def _normalize_text(value: str) -> str:
     out = (value or "").lower().strip()
-    out = out.replace("ı", "i").replace("ş", "s").replace("ç", "c").replace("ö", "o").replace("ü", "u").replace("ğ", "g")
+    out = (
+        out.replace("ı", "i")
+        .replace("ş", "s")
+        .replace("ç", "c")
+        .replace("ö", "o")
+        .replace("ü", "u")
+        .replace("ğ", "g")
+    )
     out = re.sub(r"[^a-z0-9 ]+", " ", out)
     out = re.sub(r"\s+", " ", out).strip()
     return out
 
 
-def _current_weekday_keywords() -> list[str]:
-    weekday_map = {
-        0: ["pazartesi"],
-        1: ["sali"],
-        2: ["carsamba"],
-        3: ["persembe"],
-        4: ["cuma"],
-        5: ["cumartesi"],
-        6: ["pazar"],
-    }
-    return weekday_map.get(datetime.now().weekday(), [])
+def _number_to_words_tr(n: int) -> str:
+    ones = ["sifir", "bir", "iki", "uc", "dort", "bes", "alti", "yedi", "sekiz", "dokuz"]
+    tens = ["", "on", "yirmi", "otuz", "kirk", "elli", "altmis", "yetmis", "seksen", "doksan"]
+
+    if n < 10:
+        return ones[n]
+
+    if n < 100:
+        ten_part = tens[n // 10]
+        one_part = ones[n % 10] if n % 10 else ""
+        return f"{ten_part} {one_part}".strip()
+
+    return str(n)
 
 
-def _current_month_keywords() -> list[str]:
-    month_map = {
-        1: ["ocak"],
-        2: ["subat"],
-        3: ["mart"],
-        4: ["nisan"],
-        5: ["mayis"],
-        6: ["haziran"],
-        7: ["temmuz"],
-        8: ["agustos"],
-        9: ["eylul"],
-        10: ["ekim"],
-        11: ["kasim"],
-        12: ["aralik"],
+def generate_voice_challenge() -> dict:
+    now = datetime.now()
+
+    weekday_map = [
+        "pazartesi",
+        "sali",
+        "carsamba",
+        "persembe",
+        "cuma",
+        "cumartesi",
+        "pazar",
+    ]
+    month_map = [
+        "ocak",
+        "subat",
+        "mart",
+        "nisan",
+        "mayis",
+        "haziran",
+        "temmuz",
+        "agustos",
+        "eylul",
+        "ekim",
+        "kasim",
+        "aralik",
+    ]
+
+    weekday = weekday_map[now.weekday()]
+    month = month_map[now.month - 1]
+    day = now.day
+
+    code = random.randint(1, 9)
+
+    a = random.randint(1, 5)
+    b = random.randint(1, 5)
+    result = a + b
+
+    use_math = random.choice([True, False])
+
+    if use_math:
+        prompt = (
+            f"Bugun {day} {month} {weekday} ve {a} arti {b} {result} eder, "
+            f"bu kayit bana aittir."
+        )
+        expected_numbers = [
+            str(day),
+            str(a),
+            str(b),
+            str(result),
+            _number_to_words_tr(result),
+        ]
+    else:
+        prompt = (
+            f"Bugun {day} {month} {weekday} ve dogrulama kodu {code}, "
+            f"bu kayit bana aittir."
+        )
+        expected_numbers = [
+            str(day),
+            str(code),
+            _number_to_words_tr(code),
+        ]
+
+    expected_keywords = [
+        "bugun",
+        weekday,
+        month,
+        "dogrulama" if not use_math else "arti",
+        "kayit",
+        "bana",
+        "aittir",
+    ]
+
+    return {
+        "challenge_id": f"dyn-{now.strftime('%Y%m%d%H%M%S%f')}",
+        "prompt": prompt,
+        "expected_keywords": expected_keywords,
+        "expected_numbers": expected_numbers,
     }
-    return month_map.get(datetime.now().month, [])
 
 
 def _bucket_nose_ratio(nose_x_ratio: float | None) -> str | None:
@@ -160,36 +199,70 @@ def _bucket_nose_ratio(nose_x_ratio: float | None) -> str | None:
     return "center"
 
 
+@router.post("/voice", response_model=VoiceIdentifyResponse)
+async def identify_voice(
+    req: VoiceIdentifyRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    try:
+        audio, sr = b64_to_wav_mono(req.voice_b64)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"INVALID_AUDIO: {e}")
+
+    result = await _auth_service.identify_user_by_voice(
+        session=session,
+        audio=audio,
+        sr=sr,
+        expected_user_id=req.expected_user_id,
+    )
+    return result
+
+
 @router.get("/voice-challenge", response_model=VoiceChallengeResponse)
 async def get_identify_voice_challenge():
-    ch = random.choice(IDENTIFY_CHALLENGES)
-    return VoiceChallengeResponse(challenge_id=ch["id"], prompt=ch["prompt"])
+    challenge = generate_voice_challenge()
+    return VoiceChallengeResponse(**challenge)
 
 
 @router.post("/voice-challenge/validate")
 async def validate_identify_voice_challenge(req: VoiceChallengeValidateRequest):
-    challenge = next((c for c in IDENTIFY_CHALLENGES if c["id"] == req.challenge_id), None)
-    if challenge is None:
-        raise HTTPException(status_code=400, detail="CHALLENGE_NOT_FOUND")
-
     normalized = _normalize_text(req.answer_text)
 
-    if req.challenge_id == "id-weekday":
-        expected_keywords = _current_weekday_keywords()
-    elif req.challenge_id == "id-month":
-        expected_keywords = _current_month_keywords()
-    else:
-        expected_keywords = challenge.get("keywords", [])
+    if len(normalized.split()) < 4:
+        return {
+            "passed": False,
+            "reason": "TOO_SHORT",
+        }
 
-    passed = any(k in normalized for k in expected_keywords)
+    expected_keywords = [_normalize_text(k) for k in (req.expected_keywords or []) if k]
+    expected_numbers = [_normalize_text(n) for n in (req.expected_numbers or []) if n]
+
+    keyword_hits = sum(1 for k in expected_keywords if k and k in normalized)
+    number_hits = sum(1 for n in expected_numbers if n and n in normalized)
+
+    total_expected = len(expected_keywords) + len(expected_numbers)
+    total_hits = keyword_hits + number_hits
+
+    if total_expected == 0:
+        passed = True
+    else:
+        passed = total_hits >= max(2, total_expected // 2)
+
     return {
         "passed": passed,
         "reason": "OK" if passed else "CHALLENGE_ANSWER_INVALID",
+        "keyword_hits": keyword_hits,
+        "number_hits": number_hits,
+        "total_hits": total_hits,
+        "total_expected": total_expected,
     }
 
 
 @router.post("/pose-check")
-async def identify_pose_check(req: PoseCheckRequest, session: AsyncSession = Depends(get_session)):
+async def identify_pose_check(
+    req: PoseCheckRequest,
+    session: AsyncSession = Depends(get_session),
+):
     required = (req.required_turn or "").strip().lower()
     if required not in {"center", "left", "right"}:
         raise HTTPException(status_code=400, detail="REQUIRED_TURN_INVALID")
@@ -261,7 +334,6 @@ async def identify_pose_check(req: PoseCheckRequest, session: AsyncSession = Dep
 
     detected = _bucket_nose_ratio(nose_x)
 
-    # Referans frontal frame varsa relative turn hesabı kullan
     if nose_x is not None and reference_nose_x is not None:
         delta = float(nose_x - reference_nose_x)
         if delta >= pose_min_delta:
@@ -271,7 +343,6 @@ async def identify_pose_check(req: PoseCheckRequest, session: AsyncSession = Dep
         else:
             detected = "center"
 
-    # Genel turn eşleşmesi
     if detected != required:
         return {
             "passed": False,
@@ -285,7 +356,6 @@ async def identify_pose_check(req: PoseCheckRequest, session: AsyncSession = Dep
             "pose_min_delta": pose_min_delta,
         }
 
-    # center için frontal guard
     if required == "center":
         if nose_x is None or _bucket_nose_ratio(nose_x) != "center":
             return {
@@ -299,7 +369,6 @@ async def identify_pose_check(req: PoseCheckRequest, session: AsyncSession = Dep
                 "nose_x": nose_x,
             }
 
-    # right için absolute guard
     if required == "right" and (nose_x is None or float(nose_x) < right_abs_min):
         return {
             "passed": False,
@@ -314,7 +383,6 @@ async def identify_pose_check(req: PoseCheckRequest, session: AsyncSession = Dep
             "right_abs_min": right_abs_min,
         }
 
-    # left için absolute guard
     if required == "left" and (nose_x is None or float(nose_x) > left_abs_max):
         return {
             "passed": False,
@@ -329,7 +397,6 @@ async def identify_pose_check(req: PoseCheckRequest, session: AsyncSession = Dep
             "left_abs_max": left_abs_max,
         }
 
-    # İstenirse expected user'ın ilgili pose template'i ile identity check
     if req.expected_user_id is not None:
         expected_face_vec = await _auth_service._get_user_face_template(
             session=session,
@@ -378,7 +445,10 @@ async def identify_pose_check(req: PoseCheckRequest, session: AsyncSession = Dep
 
 
 @router.post("/blink-check")
-async def identify_blink_check(req: BlinkCheckRequest, session: AsyncSession = Depends(get_session)):
+async def identify_blink_check(
+    req: BlinkCheckRequest,
+    session: AsyncSession = Depends(get_session),
+):
     if not req.face_frames_b64 or len(req.face_frames_b64) < 6:
         raise HTTPException(status_code=400, detail="BLINK_FRAMES_MIN_6")
 
@@ -476,7 +546,10 @@ async def identify_blink_check(req: BlinkCheckRequest, session: AsyncSession = D
 
 
 @router.post("/")
-async def identify(req: IdentifyRequest, session: AsyncSession = Depends(get_session)):
+async def identify(
+    req: IdentifyRequest,
+    session: AsyncSession = Depends(get_session),
+):
     try:
         img = b64_to_bgr_image(req.face_image_b64)
     except ValueError as e:
@@ -487,7 +560,6 @@ async def identify(req: IdentifyRequest, session: AsyncSession = Depends(get_ses
             session=session,
             face_img=img,
         )
-        # Debug alanlarını response'a ekle
         return IdentifyFaceResponse(
             identified=result.get("identified", False),
             user_id=result.get("user_id"),
