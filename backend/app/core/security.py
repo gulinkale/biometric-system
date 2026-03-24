@@ -1,7 +1,7 @@
 import base64
 from cryptography.fernet import Fernet
 from datetime import datetime, timedelta, timezone
-from jose import jwt
+from jose import jwt, JWTError
 from app.core.config import settings
 
 def _load_fernet(key_b64: str) -> Fernet:
@@ -40,3 +40,15 @@ def create_access_token(data: dict) -> str:
         algorithm=settings.ALGORITHM,
     )
     return encoded_jwt
+
+#JWT decode (token verification)
+def decode_access_token(token: str) -> dict:
+    try:
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
+        )
+        return payload
+    except JWTError as e:
+        raise ValueError("INVALID_TOKEN") from e
