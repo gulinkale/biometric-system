@@ -94,5 +94,7 @@ async def verify(
     result.setdefault("fusion_score", 0.0)
     result.setdefault("face_score", 0.0)
     result.setdefault("voice_score", 0.0)
+    result.setdefault("spoof_score", None)
+    result.setdefault("spoof_decision", None)
 
     return VerifyResponse(**result)

@@ -31,7 +31,8 @@ class VerifyResponse(BaseModel):
     fusion_score: float
     face_score: float
     voice_score: float
-
+    spoof_score: Optional[float] = None
+    spoof_decision: Optional[str] = None
 
 class CreateUserRequest(BaseModel):
     username: str
@@ -150,8 +151,6 @@ class VoiceIdentifyResponse(BaseModel):
 
 
 # ==== Precheck (Duplicate) Modelleri ====
-from typing import Optional
-from pydantic import BaseModel
 
 class FacePrecheckRequest(BaseModel):
     username: str

@@ -29,4 +29,19 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
+
+    # Spoof Detection (AASIST)
+    SPOOF_ENABLED: bool = True
+    SPOOF_MODE: str = "log"  # "log" or "enforce"
+    SPOOF_THRESHOLD: float = 0.5
+    SPOOF_MODEL_PATH: str = "models/AASIST.pth"
+    SPOOF_DEVICE: str = "cpu"  # "cpu", "mps", "cuda"
+
+    # Audio quality guards
+    SPOOF_MIN_AUDIO_SEC: float = 1.0
+    SPOOF_MAX_AUDIO_SEC: float = 10.0
+
+    # Fail-safe behavior
+    SPOOF_FAIL_OPEN: bool = True
+
 settings = Settings()

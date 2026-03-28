@@ -13,6 +13,10 @@ from app.services.eye_state_detector import EyeStateDetector
 from app.services.face_processor import FaceProcessor
 from app.services.fusion import fuse
 from app.services.voice_processor import VoiceProcessor, VoiceFeatures
+from app.services.voice_spoof_detector import VoiceSpoofDetector, SpoofDetectionResult
+
+import io
+import soundfile as sf
 
 logger = logging.getLogger(__name__)
 
@@ -150,12 +154,13 @@ class AuthenticationService:
         self.face = FaceProcessor()
         self.eye_state = EyeStateDetector()
         self.voice = VoiceProcessor()
+        self.voice_spoof_detector = VoiceSpoofDetector()
 
         self.fusion_thr = settings.FUSION_PASS_THRESHOLD
         self.identification_thr = settings.FACE_IDENTIFICATION_THRESHOLD
         self.voice_ident_thr = settings.VOICE_IDENTIFICATION_THRESHOLD
         self.voice_template_update_thr = settings.VOICE_TEMPLATE_UPDATE_THRESHOLD
-
+        
     # =====================================================
     # Utils
     # =====================================================
@@ -828,6 +833,23 @@ class AuthenticationService:
                 "face_score": float(face_score),
                 "voice_score": 0.0,
             }
+        
+        buf = io.BytesIO()
+        sf.write(buf, audio, sr, format="WAV")
+        voice_wav_bytes = buf.getvalue()
+        
+        spoof_result = self.voice_spoof_detector.detect_spoof(voice_wav_bytes)
+        if spoof_result.spoof_decision == "spoof":
+            return {
+                "decision": "DENIED",
+                "reason": "VOICE_SPOOF_DETECTED",
+                "identified_user": username,
+                "fusion_score": float(face_score),
+                "face_score": float(face_score),
+                "voice_score": 0.0,
+                "spoof_score": spoof_result.spoof_score,
+                "spoof_decision": spoof_result.spoof_decision,
+            }
 
         probe_v = self.extract_voice_embedding(audio, sr)
         if probe_v is None:
@@ -862,6 +884,8 @@ class AuthenticationService:
                 "fusion_score": fusion_score,
                 "face_score": float(face_score),
                 "voice_score": float(voice_score),
+                "spoof_score": spoof_result.spoof_score,
+                "spoof_decision": spoof_result.spoof_decision,
             }
 
         fusion_score = float(fuse(face_score=face_score, voice_score=voice_score))
@@ -875,6 +899,8 @@ class AuthenticationService:
             "fusion_score": fusion_score,
             "face_score": float(face_score),
             "voice_score": float(voice_score),
+            "spoof_score": spoof_result.spoof_score,
+            "spoof_decision": spoof_result.spoof_decision,
         }
 
     # =====================================================
