@@ -350,6 +350,62 @@ export function initIdentify() {
     return frames;
   }
 
+  async function captureFramesForCheck({
+    count = 5,
+    intervalMs = 120,
+    videoSource = null,
+  } = {}) {
+    const frames = [];
+    const sourceEl = videoSource || getCaptureVideoEl();
+
+    for (let i = 0; i < count; i += 1) {
+      const frame = captureFrameBase64(sourceEl, canvasEl);
+      if (frame) frames.push(frame);
+      await sleep(intervalMs);
+    }
+
+    return frames;
+  }
+
+  function pickBestSuccessfulAttempt(
+    attempts,
+    { successKey = "passed", scoreKey = "similarity" } = {},
+  ) {
+    const successful = attempts.filter(
+      (a) => a?.response && a.response[successKey] === true,
+    );
+
+    if (!successful.length) return null;
+
+    successful.sort((a, b) => {
+      const aScore = Number(a?.response?.[scoreKey] ?? -1);
+      const bScore = Number(b?.response?.[scoreKey] ?? -1);
+      return bScore - aScore;
+    });
+
+    return successful[0];
+  }
+
+  function pickBestFailedAttempt(attempts, priorityReasons = []) {
+    const failed = attempts.filter(
+      (a) =>
+        a?.response &&
+        a.response.passed !== true &&
+        a.response.identified !== true,
+    );
+
+    if (!failed.length) return null;
+
+    for (const reason of priorityReasons) {
+      const found = failed.find(
+        (a) => String(a?.response?.reason || "").toUpperCase() === reason,
+      );
+      if (found) return found;
+    }
+
+    return failed[0];
+  }
+
   function isVoiceRelatedFailure(reason) {
     const r = String(reason || "").toUpperCase();
     return r.startsWith("VOICE_");
@@ -464,23 +520,65 @@ export function initIdentify() {
   // -----------------------
   btnFaceCapture?.addEventListener("click", async () => {
     try {
-      faceB64 = captureFrameBase64(videoEl, canvasEl);
       isFaceStepPassed = false;
+      identifiedUser = null;
+      identifiedUserId = null;
+      faceScore = 0;
+      faceB64 = null;
 
-      if (!faceB64) {
+      setFaceStatus("Yuz taraniyor... En iyi kare seciliyor...");
+
+      const frames = await captureFramesForCheck({
+        count: 3,
+        intervalMs: 120,
+        videoSource: videoEl,
+      });
+
+      if (!frames.length) {
         setFaceStatus("Face frame not captured. Start camera first.");
-        setFlowDebug("face_front", "failed", "NO_FACE_FRAME");
+        setFlowDebug("face_front", "failed", "NO_FRAMES_CAPTURED");
         return;
       }
 
-      setFaceStatus("Identifying face...");
-      const idRes = await apiIdentifyFace(faceB64);
+      const attempts = [];
+      let bestSuccess = null;
 
-      if (!idRes?.identified) {
+      for (const frame of frames) {
+        try {
+          const res = await apiIdentifyFace(frame);
+          const attempt = { frame, response: res };
+          attempts.push(attempt);
+
+          if (res?.identified) {
+            bestSuccess = attempt;
+            break;
+          }
+        } catch (err) {
+          console.warn("Frame identify error:", err);
+        }
+      }
+
+      if (!bestSuccess) {
+        const bestFail = pickBestFailedAttempt(attempts, [
+          "MULTIPLE_FACES_DETECTED",
+          "NO_FACE_DETECTED",
+          "FACE_NOT_FRONTAL",
+          "EYES_CLOSED",
+          "EYES_NOT_CLEAR",
+          "NO_MATCH",
+        ]);
+
+        const idRes = bestFail?.response || null;
         identifiedUser = null;
-        setFlowDebug(idRes);
+        setFlowDebug(
+          idRes || {
+            debug_step: "face_front",
+            status: "failed",
+            reason: "UNKNOWN",
+          },
+        );
 
-        const reason = (idRes?.reason || "").toUpperCase();
+        const reason = String(idRes?.reason || "UNKNOWN").toUpperCase();
 
         if (reason === "EYES_CLOSED") {
           setFaceStatus(
@@ -524,6 +622,9 @@ export function initIdentify() {
         );
         return;
       }
+
+      faceB64 = bestSuccess.frame;
+      const idRes = bestSuccess.response;
 
       identifiedUser = idRes.username || `user_id=${idRes.user_id}`;
       identifiedUserId = Number(idRes.user_id ?? 0) || null;
@@ -718,6 +819,14 @@ export function initIdentify() {
         return;
       }
 
+      if (!identifiedUserId) {
+        setLivenessStatus(
+          "Kimlik bilgisi bulunamadi. Lutfen islemi bastan baslatin.",
+        );
+        setFlowDebug("turn_right", "failed", "EXPECTED_USER_ID_MISSING");
+        return;
+      }
+
       if (currentTask() !== "turn_right") {
         setLivenessStatus(
           `Sira hatasi. Simdi yapman gereken: ${taskLabel(currentTask())}`,
@@ -730,20 +839,58 @@ export function initIdentify() {
         return;
       }
 
-      const frame = captureFrameBase64(getCaptureVideoEl(), canvasEl);
-      if (!frame) {
+      setLivenessStatus(
+        "Sag poz kontrol ediliyor... Lutfen basinizi kisa bir sure saga cevrili tutun.",
+      );
+
+      const frames = await captureFramesForCheck({
+        count: 3,
+        intervalMs: 120,
+        videoSource: getCaptureVideoEl(),
+      });
+
+      if (!frames.length) {
         setLivenessStatus("Start camera first.");
-        setFlowDebug("turn_right", "failed", "NO_FACE_FRAME");
+        setFlowDebug("turn_right", "failed", "NO_POSE_FRAMES");
         return;
       }
 
-      const res = await apiIdentifyPoseCheck(
-        frame,
-        "right",
-        faceB64,
-        identifiedUserId,
-      );
-      if (!res?.passed) {
+      const attempts = [];
+      let bestSuccess = null;
+
+      for (const frame of frames) {
+        try {
+          const res = await apiIdentifyPoseCheck(
+            frame,
+            "right",
+            faceB64,
+            identifiedUserId,
+          );
+
+          const attempt = { frame, response: res };
+          attempts.push(attempt);
+
+          if (res?.passed) {
+            bestSuccess = attempt;
+            break;
+          }
+        } catch (err) {
+          console.warn("Right pose frame error:", err);
+        }
+      }
+
+      if (!bestSuccess) {
+        const bestFail = pickBestFailedAttempt(attempts, [
+          "POSE_NOT_ENOUGH_TURN",
+          "POSE_MISMATCH",
+          "FACE_MISMATCH",
+          "EYES_CLOSED",
+          "EYES_NOT_CLEAR",
+          "NO_FACE_DETECTED",
+          "MULTIPLE_FACES_DETECTED",
+        ]);
+
+        const res = bestFail?.response || null;
         const reason =
           res?.reason ||
           ((res?.detected_turn || "none") === "none"
@@ -774,7 +921,9 @@ export function initIdentify() {
         "turn_right",
         "passed",
         "OK",
-        res?.similarity != null ? Number(res.similarity).toFixed(3) : "-",
+        bestSuccess?.response?.similarity != null
+          ? Number(bestSuccess.response.similarity).toFixed(3)
+          : "-",
       );
       stepDone("turn_right");
     } catch (e) {
@@ -794,6 +943,14 @@ export function initIdentify() {
         return;
       }
 
+      if (!identifiedUserId) {
+        setLivenessStatus(
+          "Kimlik bilgisi bulunamadi. Lutfen islemi bastan baslatin.",
+        );
+        setFlowDebug("turn_left", "failed", "EXPECTED_USER_ID_MISSING");
+        return;
+      }
+
       if (currentTask() !== "turn_left") {
         setLivenessStatus(
           `Sira hatasi. Simdi yapman gereken: ${taskLabel(currentTask())}`,
@@ -806,20 +963,58 @@ export function initIdentify() {
         return;
       }
 
-      const frame = captureFrameBase64(getCaptureVideoEl(), canvasEl);
-      if (!frame) {
+      setLivenessStatus(
+        "Sol poz kontrol ediliyor... Lutfen basinizi kisa bir sure sola cevrili tutun.",
+      );
+
+      const frames = await captureFramesForCheck({
+        count: 3,
+        intervalMs: 120,
+        videoSource: getCaptureVideoEl(),
+      });
+
+      if (!frames.length) {
         setLivenessStatus("Start camera first.");
-        setFlowDebug("turn_left", "failed", "NO_FACE_FRAME");
+        setFlowDebug("turn_left", "failed", "NO_POSE_FRAMES");
         return;
       }
+      
+      const attempts = [];
+      let bestSuccess = null;
 
-      const res = await apiIdentifyPoseCheck(
-        frame,
-        "left",
-        faceB64,
-        identifiedUserId,
-      );
-      if (!res?.passed) {
+      for (const frame of frames) {
+        try {
+          const res = await apiIdentifyPoseCheck(
+            frame,
+            "left",
+            faceB64,
+            identifiedUserId,
+          );
+
+          const attempt = { frame, response: res };
+          attempts.push(attempt);
+
+          if (res?.passed) {
+            bestSuccess = attempt;
+            break;
+          }
+        } catch (err) {
+          console.warn("Left pose frame error:", err);
+        }
+      }
+
+      if (!bestSuccess) {
+        const bestFail = pickBestFailedAttempt(attempts, [
+          "POSE_NOT_ENOUGH_TURN",
+          "POSE_MISMATCH",
+          "FACE_MISMATCH",
+          "EYES_CLOSED",
+          "EYES_NOT_CLEAR",
+          "NO_FACE_DETECTED",
+          "MULTIPLE_FACES_DETECTED",
+        ]);
+
+        const res = bestFail?.response || null;
         const reason =
           res?.reason ||
           ((res?.detected_turn || "none") === "none"
@@ -850,7 +1045,9 @@ export function initIdentify() {
         "turn_left",
         "passed",
         "OK",
-        res?.similarity != null ? Number(res.similarity).toFixed(3) : "-",
+        bestSuccess?.response?.similarity != null
+          ? Number(bestSuccess.response.similarity).toFixed(3)
+          : "-",
       );
       stepDone("turn_left");
     } catch (e) {
@@ -1009,7 +1206,9 @@ export function initIdentify() {
 
       setFlowDebug(
         "done",
-        res.decision === "ACCEPTED" || res.decision === "GRANTED" ? "passed" : "failed",
+        res.decision === "ACCEPTED" || res.decision === "GRANTED"
+          ? "passed"
+          : "failed",
         `${res.reason || "DONE"} | SPOOF: ${res.spoof_decision || "-"} | SCORE: ${
           res.spoof_score != null ? Number(res.spoof_score).toFixed(3) : "-"
         }`,

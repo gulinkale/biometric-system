@@ -69,7 +69,7 @@ class PoseCheckRequest(BaseModel):
     face_image_b64: str
     required_turn: str
     reference_face_image_b64: Optional[str] = None
-    expected_user_id: Optional[int] = None
+    expected_user_id: int
     require_eyes_open: bool = True
 
 
@@ -397,39 +397,38 @@ async def identify_pose_check(
             "left_abs_max": left_abs_max,
         }
 
-    if req.expected_user_id is not None:
-        expected_face_vec = await _auth_service._get_user_face_template(
-            session=session,
-            user_id=int(req.expected_user_id),
-            pose=required,
-        )
-        if expected_face_vec is None:
-            return {
-                "passed": False,
-                "required_turn": required,
-                "detected_turn": detected,
-                "reason": "EXPECTED_USER_POSE_TEMPLATE_MISSING",
-                "similarity": similarity,
-                "reference_similarity": None,
-                "reference_nose_x": reference_nose_x,
-                "nose_x": nose_x,
-                "pose_min_delta": pose_min_delta,
-            }
+    expected_face_vec = await _auth_service._get_user_face_template(
+        session=session,
+        user_id=int(req.expected_user_id),
+        pose=required,
+    )
+    if expected_face_vec is None:
+        return {
+            "passed": False,
+            "required_turn": required,
+            "detected_turn": detected,
+            "reason": "EXPECTED_USER_POSE_TEMPLATE_MISSING",
+            "similarity": similarity,
+            "reference_similarity": None,
+            "reference_nose_x": reference_nose_x,
+            "nose_x": nose_x,
+            "pose_min_delta": pose_min_delta,
+        }
 
-        template_similarity = float(_auth_service._cosine(probe_face_vec, expected_face_vec))
-        if template_similarity < pose_identity_thr:
-            return {
-                "passed": False,
-                "required_turn": required,
-                "detected_turn": detected,
-                "reason": "FACE_MISMATCH",
-                "similarity": template_similarity,
-                "reference_similarity": None,
-                "threshold": pose_identity_thr,
-                "reference_nose_x": reference_nose_x,
-                "nose_x": nose_x,
-                "pose_min_delta": pose_min_delta,
-            }
+    template_similarity = float(_auth_service._cosine(probe_face_vec, expected_face_vec))
+    if template_similarity < pose_identity_thr:
+        return {
+            "passed": False,
+            "required_turn": required,
+            "detected_turn": detected,
+            "reason": "FACE_MISMATCH",
+            "similarity": template_similarity,
+            "reference_similarity": None,
+            "threshold": pose_identity_thr,
+            "reference_nose_x": reference_nose_x,
+            "nose_x": nose_x,
+            "pose_min_delta": pose_min_delta,
+        }
 
     return {
         "passed": True,
@@ -442,7 +441,6 @@ async def identify_pose_check(
         "nose_x": nose_x,
         "pose_min_delta": pose_min_delta,
     }
-
 
 @router.post("/blink-check")
 async def identify_blink_check(
