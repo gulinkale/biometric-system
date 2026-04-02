@@ -3,10 +3,10 @@ from typing import Optional
 import io
 import os
 
+import librosa
 import numpy as np
 import soundfile as sf
 import torch
-import torchaudio
 
 from app.core.config import settings
 from app.services.aasist_model import Model
@@ -71,7 +71,7 @@ class VoiceSpoofDetector:
             new_key = key.replace("module.", "", 1) if key.startswith("module.") else key
             cleaned_state_dict[new_key] = value
 
-        model.load_state_dict(cleaned_state_dict, strict=False)
+        model.load_state_dict(cleaned_state_dict, strict=True)
         model.to(self.device)
         model.eval()
 
@@ -100,14 +100,28 @@ class VoiceSpoofDetector:
 
         duration_sec = float(len(audio_np) / sr)
 
+        # 16k'e çevir
+        if sr != 16000:
+            audio_np = librosa.resample(audio_np, orig_sr=sr, target_sr=16000)
+            sr = 16000
+
+        # peak normalize
+        peak = float(np.max(np.abs(audio_np))) if len(audio_np) > 0 else 0.0
+        if peak > 0.0:
+            audio_np = audio_np / peak
+
+        # sabit uzunluk: 4 saniye
+        target_len = 16000 * 4
+        if len(audio_np) > target_len:
+            audio_np = audio_np[:target_len]
+        else:
+            pad_len = target_len - len(audio_np)
+            audio_np = np.pad(audio_np, (0, pad_len))
+
         waveform = torch.from_numpy(audio_np).float()
 
         if waveform.ndim == 1:
             waveform = waveform.unsqueeze(0)  # [1, T]
-
-        # model 16k bekliyor
-        if sr != 16000:
-            waveform = torchaudio.functional.resample(waveform, sr, 16000)
 
         return waveform, duration_sec
 
@@ -145,14 +159,14 @@ class VoiceSpoofDetector:
 
             with torch.no_grad():
                 _, output = self.model(input_tensor)
-
-                # output shape: [batch, 2]
                 probs = torch.softmax(output, dim=1)
 
-                # Varsayım:
                 # class 0 = genuine / bona fide
                 # class 1 = spoof
                 spoof_score = float(probs[0, 1].item())
+
+                # Test için açmak istersen:
+                # print("AASIST PROBS:", probs.cpu().numpy())
 
             decision = "spoof" if spoof_score >= self.threshold else "genuine"
 

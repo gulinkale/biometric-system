@@ -837,19 +837,20 @@ class AuthenticationService:
         buf = io.BytesIO()
         sf.write(buf, audio, sr, format="WAV")
         voice_wav_bytes = buf.getvalue()
+
+        print("WAV BYTES LENGTH:", len(voice_wav_bytes))
+
+        with open("debug_verify.wav", "wb") as f:
+            f.write(voice_wav_bytes)
+    
         
         spoof_result = self.voice_spoof_detector.detect_spoof(voice_wav_bytes)
-        if spoof_result.spoof_decision == "spoof":
-            return {
-                "decision": "DENIED",
-                "reason": "VOICE_SPOOF_DETECTED",
-                "identified_user": username,
-                "fusion_score": float(face_score),
-                "face_score": float(face_score),
-                "voice_score": 0.0,
-                "spoof_score": spoof_result.spoof_score,
-                "spoof_decision": spoof_result.spoof_decision,
-            }
+        print("---- SPOOF DEBUG ----")
+        print("SPOOF DECISION:", spoof_result.spoof_decision)
+        print("SPOOF SCORE:", spoof_result.spoof_score)
+        print("SPOOF ERROR:", spoof_result.error)
+        print("---------------------")
+
 
         probe_v = self.extract_voice_embedding(audio, sr)
         if probe_v is None:

@@ -111,9 +111,9 @@ export async function startVoiceRecording() {
 
   mediaStream = await navigator.mediaDevices.getUserMedia({
     audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
     },
     video: false,
   });

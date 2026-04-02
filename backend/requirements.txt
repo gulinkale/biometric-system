@@ -3,7 +3,8 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 
 # Validation & config
-pydantic==2.8.2
+pydantic==2.12.5
+pydantic-core==2.41.5
 pydantic-settings==2.4.0
 
 
@@ -32,3 +33,7 @@ setuptools<81
 
 # Testing
 pytest==8.3.2 
+
+# ML / Deep Learning Dependencies
+torch>=2.0.0
+torchaudio>=2.0.0
