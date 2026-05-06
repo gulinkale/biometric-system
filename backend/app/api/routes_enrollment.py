@@ -21,6 +21,13 @@ from app.domain.schemas import (
     FacePrecheckResponse,
     VoicePrecheckRequest,
     VoicePrecheckResponse,
+    SaveSecurityAnswersRequest,
+    SaveSecurityAnswersResponse,
+    SecurityQuestionResponse,
+)
+from app.services.security_question_service import (
+    get_all_questions,
+    save_user_answers,
 )
 
 logger = logging.getLogger(__name__)
@@ -402,3 +409,19 @@ async def enroll_biometric(
             face_status="failed",
             voice_status="failed",
         )
+    
+@router.get("/security-questions", response_model=list[SecurityQuestionResponse])
+async def get_security_questions(db: AsyncSession = Depends(get_session)):
+    return await get_all_questions(db)
+
+@router.post("/security-answers", response_model=SaveSecurityAnswersResponse)
+async def save_security_answers(
+    request: SaveSecurityAnswersRequest,
+    db: AsyncSession = Depends(get_session)
+):
+    await save_user_answers(db, request.user_id, request.answers)
+
+    return SaveSecurityAnswersResponse(
+        success=True,
+        message="Security answers saved successfully"
+    )

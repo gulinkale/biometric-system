@@ -8,8 +8,9 @@ from app.api.routes_auth import router as auth_router
 from app.api.routes_enrollment import router as enroll_router
 from app.api.routes_identify import router as identify_router
 from app.api.routes_admin import router as admin_router
-from app.db.session import engine
+from app.db.session import engine, SessionLocal
 from app.db.models import Base
+from app.db.seed_security_questions import seed_security_questions
 
 
 app = FastAPI(title=settings.APP_NAME)
@@ -41,6 +42,8 @@ async def health():
 async def on_startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        async with SessionLocal() as db:
+            await seed_security_questions(db)
 
 
 @app.on_event("shutdown")

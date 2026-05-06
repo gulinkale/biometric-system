@@ -3,6 +3,7 @@ from cryptography.fernet import Fernet
 from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 from app.core.config import settings
+import bcrypt
 
 def _load_fernet(key_b64: str) -> Fernet:
     if not key_b64:
@@ -52,3 +53,45 @@ def decode_access_token(token: str) -> dict:
         return payload
     except JWTError as e:
         raise ValueError("INVALID_TOKEN") from e
+
+
+
+# =========================
+# SECURITY QUESTION HELPERS
+# =========================
+
+import unicodedata
+
+import unicodedata
+
+def normalize_security_answer(text: str) -> str:
+    if not text:
+        return ""
+
+    text = text.strip().lower()
+
+    # Unicode normalize (çok kritik)
+    text = unicodedata.normalize("NFKD", text)
+
+    # combining karakterleri temizle (noktalı i vs)
+    text = "".join(c for c in text if not unicodedata.combining(c))
+
+    # Türkçe özel fix
+    text = text.replace("ı", "i")
+
+    return text
+
+
+def hash_security_answer(answer: str) -> str:
+    normalized = normalize_security_answer(answer)
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(normalized.encode("utf-8"), salt)
+    return hashed.decode("utf-8")
+
+
+def verify_security_answer(input_answer: str, stored_hash: str) -> bool:
+    normalized = normalize_security_answer(input_answer)
+    return bcrypt.checkpw(
+        normalized.encode("utf-8"),
+        stored_hash.encode("utf-8")
+    )

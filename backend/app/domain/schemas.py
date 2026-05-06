@@ -174,3 +174,38 @@ class VoicePrecheckResponse(BaseModel):
     matched_username: Optional[str] = None
     matched_user_id: Optional[int] = None
     similarity: float = 0.0
+
+# =========================
+# SECURITY QUESTIONS
+# =========================
+
+class SecurityQuestionResponse(BaseModel):
+    question_id: int
+    question_text: str
+
+class AnswerItem(BaseModel):
+    question_id: int
+    answer: str
+
+class SaveSecurityAnswersRequest(BaseModel):
+    user_id: int
+    answers: list[AnswerItem]
+
+class SaveSecurityAnswersResponse(BaseModel):
+    success: bool
+    message: str
+
+
+class SecurityChallengeResponse(BaseModel):
+    question_id: int
+    question_text: str
+
+
+class VerifySecurityAnswerRequest(BaseModel):
+    user_id: int
+    question_id: int
+    answer: str
+
+
+class VerifySecurityAnswerResponse(BaseModel):
+    answer_ok: bool

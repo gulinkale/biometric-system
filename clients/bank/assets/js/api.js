@@ -182,3 +182,24 @@ export function apiLogin(username, password) {
     body: JSON.stringify({ username, password }),
   });
 }
+
+// -------------------------
+// SECURITY QUESTIONS
+// -------------------------
+export function apiGetSecurityQuestion(userId) {
+  return jsonFetch(`/identify/security-question?user_id=${userId}`, {
+    method: "GET",
+  });
+}
+
+export function apiVerifySecurityAnswer({ user_id, question_id, answer }) {
+  return jsonFetch("/identify/security-answer", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      user_id,
+      question_id,
+      answer,
+    }),
+  });
+}

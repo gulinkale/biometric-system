@@ -14,7 +14,15 @@ from app.db.session import get_session
 from app.services.authentication_service import AuthenticationService
 from app.utils.audio_io import b64_to_wav_mono
 from app.utils.image_io import b64_to_bgr_image
-
+from app.services.security_question_service import (
+    get_random_question,
+    verify_answer,
+)
+from app.domain.schemas import (
+    SecurityChallengeResponse,
+    VerifySecurityAnswerRequest,
+    VerifySecurityAnswerResponse,
+)
 router = APIRouter(prefix="/identify", tags=["identify"])
 
 _auth_service = AuthenticationService()
@@ -555,3 +563,32 @@ async def identify(
         if str(e) == "FACE_NOT_DETECTED":
             raise HTTPException(status_code=400, detail="FACE_NOT_DETECTED")
         raise
+
+
+@router.get("/security-question", response_model=SecurityChallengeResponse)
+async def get_security_question(
+    user_id: int,
+    db: AsyncSession = Depends(get_session)
+):
+    result = await get_random_question(db, user_id)
+
+    if not result:
+        raise HTTPException(status_code=404, detail="NO_SECURITY_QUESTION")
+
+    return result
+
+@router.post("/security-answer", response_model=VerifySecurityAnswerResponse)
+async def verify_security_answer_endpoint(
+    request: VerifySecurityAnswerRequest,
+    db: AsyncSession = Depends(get_session)
+):
+    is_correct = await verify_answer(
+        db,
+        request.user_id,
+        request.question_id,
+        request.answer
+    )
+
+    return VerifySecurityAnswerResponse(
+        answer_ok=is_correct
+    )
