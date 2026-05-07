@@ -79,6 +79,10 @@ export function initIdentify() {
   const flowDebugScoreEl = byId("flowDebugScore");
   const flowDebugHistoryEl = byId("flowDebugHistory");
 
+  //sound
+  const angleCompleteSound = new Audio("/clients/shared/angle-complete.wav");
+  angleCompleteSound.volume = 0.35;
+
   let faceB64 = null;
   let faceScore = 0;
   let identifiedUser = null;
@@ -119,6 +123,13 @@ export function initIdentify() {
 
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function playStepCompleteSound() {
+    try {
+      angleCompleteSound.currentTime = 0;
+      angleCompleteSound.play().catch(() => {});
+    } catch {}
   }
 
   function getCaptureVideoEl() {
@@ -294,6 +305,7 @@ export function initIdentify() {
     }
 
     setFlowDebug(flowStepName(task), "passed", "OK");
+    playStepCompleteSound();
 
     if (task === "answer") {
       isVoiceAnswerPassed = true;
@@ -312,7 +324,8 @@ export function initIdentify() {
       if (btnCheckTurnLeft) btnCheckTurnLeft.disabled = true;
       if (btnCheckBlink) btnCheckBlink.disabled = true;
       if (btnLivenessContinue) btnLivenessContinue.disabled = true;
-      if (btnRefreshIdentifyChallenge) btnRefreshIdentifyChallenge.disabled = true;
+      if (btnRefreshIdentifyChallenge)
+        btnRefreshIdentifyChallenge.disabled = true;
       if (identifyChallengeAnswerEl) identifyChallengeAnswerEl.disabled = true;
       if (btnCaptureSecurityAnswer) btnCaptureSecurityAnswer.disabled = true;
       if (securityAnswerInputEl) securityAnswerInputEl.disabled = true;
@@ -324,10 +337,14 @@ export function initIdentify() {
       if (btnCaptureSecurityAnswer) btnCaptureSecurityAnswer.disabled = false;
       if (securityAnswerInputEl) securityAnswerInputEl.disabled = false;
 
-      if (identifyChallengePromptEl) identifyChallengePromptEl.style.display = "none";
-      if (identifyChallengeAnswerEl) identifyChallengeAnswerEl.style.display = "none";
-      if (btnCaptureChallengeAnswer) btnCaptureChallengeAnswer.style.display = "none";
-      if (btnRefreshIdentifyChallenge) btnRefreshIdentifyChallenge.style.display = "none";
+      if (identifyChallengePromptEl)
+        identifyChallengePromptEl.style.display = "none";
+      if (identifyChallengeAnswerEl)
+        identifyChallengeAnswerEl.style.display = "none";
+      if (btnCaptureChallengeAnswer)
+        btnCaptureChallengeAnswer.style.display = "none";
+      if (btnRefreshIdentifyChallenge)
+        btnRefreshIdentifyChallenge.style.display = "none";
       if (btnCheckTurnRight) btnCheckTurnRight.style.display = "none";
       if (btnCheckTurnLeft) btnCheckTurnLeft.style.display = "none";
       if (btnCheckBlink) btnCheckBlink.style.display = "none";
@@ -428,10 +445,7 @@ export function initIdentify() {
 
       securityQuestionId = data.question_id;
 
-      setText(
-        securityQuestionTextEl,
-        `Guvenlik sorusu: ${data.question_text}`,
-      );
+      setText(securityQuestionTextEl, `Guvenlik sorusu: ${data.question_text}`);
 
       if (securityAnswerInputEl) securityAnswerInputEl.value = "";
       if (securityStatusEl) setText(securityStatusEl, "");
@@ -585,7 +599,9 @@ export function initIdentify() {
         }
 
         if (reason === "MULTIPLE_FACES_DETECTED") {
-          setFaceStatus("Multiple faces detected. Keep only one face in frame.");
+          setFaceStatus(
+            "Multiple faces detected. Keep only one face in frame.",
+          );
           return;
         }
 
@@ -625,6 +641,7 @@ export function initIdentify() {
       );
 
       setFlowDebug("face_front", "passed", "IDENTIFIED", faceScore.toFixed(3));
+      playStepCompleteSound();
 
       isFaceStepPassed = true;
       voiceVerifyAttempts = 0;
@@ -677,6 +694,7 @@ export function initIdentify() {
 
       setText(securityStatusEl, "Dogru cevap. Liveness baslatiliyor...");
       setFlowDebug("security_answer", "passed", "OK");
+      playStepCompleteSound();
 
       await loadIdentifyChallenge();
       updateLivenessUI();

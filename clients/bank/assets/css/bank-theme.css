@@ -149,3 +149,41 @@ body[data-client="bank"] .secondary-action {
   background: #ede9fe !important;
   color: #2e1065 !important;
 }
+
+body[data-client="bank"] .security-question-grid {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 18px !important;
+  margin-top: 18px !important;
+  max-width: 720px !important;
+}
+
+body[data-client="bank"] .security-question-item {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 8px !important;
+}
+
+body[data-client="bank"] .security-question-item label {
+  display: block !important;
+  font-weight: 700 !important;
+  color: #d9c8ff !important;
+}
+
+body[data-client="bank"] .security-question-item select,
+body[data-client="bank"] .security-question-item input {
+  display: block !important;
+  width: 100% !important;
+  min-height: 44px !important;
+  border-radius: 12px !important;
+  border: 1px solid rgba(190, 160, 255, 0.35) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #f3edff !important;
+  padding: 10px 12px !important;
+  font-size: 0.95rem !important;
+  margin: 0 !important;
+}
+
+body[data-client="bank"] .security-question-item select option {
+  color: #111827 !important;
+}

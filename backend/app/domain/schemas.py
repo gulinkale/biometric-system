@@ -191,6 +191,22 @@ class SaveSecurityAnswersRequest(BaseModel):
     user_id: int
     answers: list[AnswerItem]
 
+    @model_validator(mode="after")
+    def validate_security_answers(self):
+        if len(self.answers) != 3:
+            raise ValueError("Exactly 3 security answers are required.")
+
+        question_ids = [item.question_id for item in self.answers]
+
+        if len(question_ids) != len(set(question_ids)):
+            raise ValueError("Security questions must be different.")
+
+        for item in self.answers:
+            if not item.answer or not item.answer.strip():
+                raise ValueError("Security answer cannot be empty.")
+
+        return self
+
 class SaveSecurityAnswersResponse(BaseModel):
     success: bool
     message: str

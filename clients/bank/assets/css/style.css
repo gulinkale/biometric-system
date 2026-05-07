@@ -306,4 +306,35 @@ body[data-page="enroll"] .app-container {
   }
 }
 
+.security-question-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+  margin-top: 18px;
+}
 
+.security-question-item {
+  display: grid;
+  gap: 8px;
+}
+
+.security-question-item label {
+  font-weight: 700;
+  color: #d9c8ff;
+}
+
+.security-question-item select,
+.security-question-item input {
+  width: 100%;
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1px solid rgba(190, 160, 255, 0.35);
+  background: rgba(255, 255, 255, 0.08);
+  color: #f3edff;
+  padding: 10px 12px;
+  font-size: 0.95rem;
+}
+
+.security-question-item select option {
+  color: #111827;
+}

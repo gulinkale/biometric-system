@@ -85,6 +85,20 @@ export function apiEnrollBiometric(username, role, face_samples, voice_samples) 
   });
 }
 
+export function apiSaveSecurityAnswers(payload) {
+  return jsonFetch("/enroll/security-answers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function apiGetSecurityQuestions() {
+  return jsonFetch("/enroll/security-questions", {
+    method: "GET",
+  });
+}
+
 // -------------------------
 // IDENTIFY (1:N) - Face
 // -------------------------

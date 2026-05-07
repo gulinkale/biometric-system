@@ -9,11 +9,10 @@ import {
   apiIdentifyPoseCheck,
   apiPrecheckFace,
   apiPrecheckVoice,
+  apiSaveSecurityAnswers,
+  apiGetSecurityQuestions,
 } from "./api.js";
-import {
-  startVoiceRecording,
-  stopVoiceRecordingToBase64,
-} from "./voice.js";
+import { startVoiceRecording, stopVoiceRecordingToBase64 } from "./voice.js";
 
 export function initEnroll() {
   // ---------- DOM ----------
@@ -22,6 +21,7 @@ export function initEnroll() {
   const faceStepEl = byId("faceStep");
   const voiceStepEl = byId("voiceStep");
   const completeStepEl = byId("completeStep");
+  const securityStepEl = byId("securityStep");
 
   const stepIndicatorEl = byId("stepIndicator");
   const stepTitleEl = byId("stepTitle");
@@ -31,6 +31,8 @@ export function initEnroll() {
   const btnBackToFace = byId("btnBackToFace");
   const btnGoComplete = byId("btnGoComplete");
   const completeStatusEl = byId("completeStatus");
+  const btnBackToVoice = byId("btnBackToVoice");
+  const btnSaveSecurityQuestions = byId("btnSaveSecurityQuestions");
 
   const videoEl = byId("camVideo");
   const canvasEl = byId("camCanvas");
@@ -52,6 +54,20 @@ export function initEnroll() {
   const voiceTranscriptPreviewEl = byId("voiceTranscriptPreview");
   const audioPreview = byId("audioPreview");
   const voiceStatusEl = byId("voiceStatus");
+
+  const securityQuestion1El = byId("securityQuestion1");
+  const securityQuestion2El = byId("securityQuestion2");
+  const securityQuestion3El = byId("securityQuestion3");
+
+  const securityAnswer1El = byId("securityAnswer1");
+  const securityAnswer2El = byId("securityAnswer2");
+  const securityAnswer3El = byId("securityAnswer3");
+
+  const securityEnrollStatusEl = byId("securityEnrollStatus");
+
+  //sound
+  const angleCompleteSound = new Audio("/clients/shared/angle-complete.wav");
+  angleCompleteSound.volume = 0.35;
 
   // ---------- Auth / User ----------
   const query = new URLSearchParams(window.location.search);
@@ -145,6 +161,13 @@ export function initEnroll() {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  function playAngleCompleteSound() {
+    try {
+      angleCompleteSound.currentTime = 0;
+      angleCompleteSound.play().catch(() => {});
+    } catch {}
+  }
+
   function normalizeText(value) {
     return String(value || "")
       .toLowerCase()
@@ -191,7 +214,7 @@ export function initEnroll() {
 
   async function recognizePhraseUntilMatch(
     expectedText,
-    { lang = "tr-TR", timeoutMs = 10000 } = {}
+    { lang = "tr-TR", timeoutMs = 10000 } = {},
   ) {
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -336,7 +359,7 @@ export function initEnroll() {
     if (progressBarEl) {
       const pct = Math.min(
         100,
-        Math.round((current / FACE_TOTAL_TARGET) * 100)
+        Math.round((current / FACE_TOTAL_TARGET) * 100),
       );
       progressBarEl.style.width = `${pct}%`;
     }
@@ -344,7 +367,7 @@ export function initEnroll() {
     if (angleStatusEl) {
       setText(
         angleStatusEl,
-        `Center: ${angleCounts.center}/${FACE_TARGET_PER_ANGLE} | Left: ${angleCounts.left}/${FACE_TARGET_PER_ANGLE} | Right: ${angleCounts.right}/${FACE_TARGET_PER_ANGLE}`
+        `Center: ${angleCounts.center}/${FACE_TARGET_PER_ANGLE} | Left: ${angleCounts.left}/${FACE_TARGET_PER_ANGLE} | Right: ${angleCounts.right}/${FACE_TARGET_PER_ANGLE}`,
       );
     }
   }
@@ -363,14 +386,15 @@ export function initEnroll() {
 
     setText(
       angleGuideEl,
-      friendly[requiredAngle] || "Align your face with the requested direction."
+      friendly[requiredAngle] ||
+        "Align your face with the requested direction.",
     );
   }
 
   function updateVoiceSampleProgress() {
     setText(
       voiceSampleProgressEl,
-      `Saved ${voiceSamples.length}/${VOICE_TARGET_SAMPLES} samples`
+      `Saved ${voiceSamples.length}/${VOICE_TARGET_SAMPLES} samples`,
     );
   }
 
@@ -382,7 +406,7 @@ export function initEnroll() {
     if (voiceEnrollmentCompleted) {
       setText(
         voiceChallengePromptEl,
-        `${VOICE_TARGET_SAMPLES} samples captured. Voice enrollment completed.`
+        `${VOICE_TARGET_SAMPLES} samples captured. Voice enrollment completed.`,
       );
       return;
     }
@@ -390,7 +414,7 @@ export function initEnroll() {
     const prompt = getCurrentVoicePrompt();
     setText(
       voiceChallengePromptEl,
-      prompt || "Please read the displayed sentence clearly."
+      prompt || "Please read the displayed sentence clearly.",
     );
   }
 
@@ -405,14 +429,16 @@ export function initEnroll() {
 
     const nextAngle = getNextRequiredAngle();
     if (nextAngle) {
+      playAngleCompleteSound();
       requiredAngle = nextAngle;
       updateFaceGuidance();
       setStatus(
-        `Angle completed. Now collect ${FACE_TARGET_PER_ANGLE} samples for ${requiredAngle.toUpperCase()}.`
+        `Angle completed. Now collect ${FACE_TARGET_PER_ANGLE} samples for ${requiredAngle.toUpperCase()}.`,
       );
       return;
     }
 
+    playAngleCompleteSound();
     faceEnrollmentCompleted = true;
     faceCaptureRunning = false;
     updateFaceGuidance();
@@ -420,8 +446,12 @@ export function initEnroll() {
   }
 
   function parsePoseCheckResult(result, currentRequiredAngle) {
-    const normalizedStatus = String(result?.status || "").trim().toUpperCase();
-    const normalizedReason = String(result?.reason || "").trim().toUpperCase();
+    const normalizedStatus = String(result?.status || "")
+      .trim()
+      .toUpperCase();
+    const normalizedReason = String(result?.reason || "")
+      .trim()
+      .toUpperCase();
 
     const accepted =
       result?.accepted === true ||
@@ -455,11 +485,11 @@ export function initEnroll() {
     voiceStepEl?.classList.add("hidden");
     completeStepEl?.classList.add("hidden");
 
-    setText(stepIndicatorEl, "Step 1 of 2");
+    setText(stepIndicatorEl, "Step 1 of 3");
     setText(stepTitleEl, "Face Enrollment");
     setText(
       stepDescriptionEl,
-      "Collect 5 center, 5 left and 5 right face samples. Wrong angles will be rejected."
+      "Collect 5 center, 5 left and 5 right face samples. Wrong angles will be rejected.",
     );
 
     updateFaceGuidance();
@@ -471,29 +501,83 @@ export function initEnroll() {
     voiceStepEl?.classList.remove("hidden");
     completeStepEl?.classList.add("hidden");
 
-    setText(stepIndicatorEl, "Step 2 of 2");
+    setText(stepIndicatorEl, "Step 2 of 3");
     setText(stepTitleEl, "Voice Enrollment");
     setText(
       stepDescriptionEl,
-      `Record ${VOICE_TARGET_SAMPLES} voice samples by reading the shown sentence.`
+      `Record ${VOICE_TARGET_SAMPLES} voice samples by reading the shown sentence.`,
     );
 
     updateVoicePrompt();
     updateVoiceSampleProgress();
   }
 
+  function showSecurityStep() {
+    faceStepEl?.classList.add("hidden");
+    voiceStepEl?.classList.add("hidden");
+    securityStepEl?.classList.remove("hidden");
+    completeStepEl?.classList.add("hidden");
+
+    setText(stepIndicatorEl, "Step 3 of 3");
+    setText(stepTitleEl, "Security Questions");
+
+    setText(
+      stepDescriptionEl,
+      "Select 3 different security questions and enter your answers.",
+    );
+    loadSecurityQuestions();
+  }
+
+  async function loadSecurityQuestions() {
+    try {
+      const questions = await apiGetSecurityQuestions();
+
+      const selects = [
+        securityQuestion1El,
+        securityQuestion2El,
+        securityQuestion3El,
+      ];
+
+      for (const select of selects) {
+        if (!select) continue;
+
+        select.innerHTML = `
+        <option value="">Select a question</option>
+      `;
+
+        for (const q of questions) {
+          const option = document.createElement("option");
+
+          option.value = q.question_id;
+          option.textContent = q.question_text;
+
+          select.appendChild(option);
+        }
+      }
+
+      setText(securityEnrollStatusEl, "Questions loaded.");
+    } catch (e) {
+      console.error(e);
+      setText(
+        securityEnrollStatusEl,
+        `Question load failed: ${e.message || "UNKNOWN_ERROR"}`,
+      );
+    }
+  }
+
   function showCompleteStep(
-    message = "Biometric enrollment completed successfully."
+    message = "Biometric enrollment completed successfully.",
   ) {
     faceStepEl?.classList.add("hidden");
     voiceStepEl?.classList.add("hidden");
+    securityStepEl?.classList.add("hidden");
     completeStepEl?.classList.remove("hidden");
 
     setText(stepIndicatorEl, "Completed");
     setText(stepTitleEl, "Enrollment Completed");
     setText(
       stepDescriptionEl,
-      "Your face and voice enrollment steps have been completed successfully."
+      "Your face and voice enrollment steps have been completed successfully.",
     );
     setText(completeStatusEl, message);
   }
@@ -555,9 +639,7 @@ export function initEnroll() {
   btnStartEnroll?.addEventListener("click", async () => {
     try {
       if (faceDuplicateBlocked) {
-        setStatus(
-          faceDuplicateMessage || "Bu yüz zaten sistemde kayıtlı."
-        );
+        setStatus(faceDuplicateMessage || "Bu yüz zaten sistemde kayıtlı.");
         return;
       }
 
@@ -584,7 +666,7 @@ export function initEnroll() {
       updateStepButtons();
 
       setStatus(
-        `Face enrollment started. Please look ${requiredAngle.toUpperCase()}.`
+        `Face enrollment started. Please look ${requiredAngle.toUpperCase()}.`,
       );
 
       while (faceCaptureRunning && !faceEnrollmentCompleted) {
@@ -612,7 +694,7 @@ export function initEnroll() {
           setStatus(
             `Rejected frame for ${currentRequiredAngle.toUpperCase()}: ${
               poseResult.reason || "WRONG_POSE"
-            }`
+            }`,
           );
           await sleep(FACE_CAPTURE_INTERVAL_MS);
           continue;
@@ -630,10 +712,9 @@ export function initEnroll() {
 
             if (precheck?.duplicate) {
               faceDuplicateBlocked = true;
-              faceDuplicateMessage =
-                precheck?.matched_username
-                  ? `Bu yüz zaten ${precheck.matched_username} kullanıcısına kayıtlı.`
-                  : "Bu yüz zaten sistemde kayıtlı.";
+              faceDuplicateMessage = precheck?.matched_username
+                ? `Bu yüz zaten ${precheck.matched_username} kullanıcısına kayıtlı.`
+                : "Bu yüz zaten sistemde kayıtlı.";
               faceCaptureRunning = false;
               faceEnrollmentCompleted = false;
 
@@ -655,7 +736,7 @@ export function initEnroll() {
         updateFaceProgress();
 
         setStatus(
-          `Accepted ${currentRequiredAngle.toUpperCase()} sample ${angleCounts[currentRequiredAngle]}/${FACE_TARGET_PER_ANGLE}`
+          `Accepted ${currentRequiredAngle.toUpperCase()} sample ${angleCounts[currentRequiredAngle]}/${FACE_TARGET_PER_ANGLE}`,
         );
 
         advanceAngleIfNeeded();
@@ -685,7 +766,7 @@ export function initEnroll() {
     try {
       if (voiceDuplicateBlocked) {
         setVoiceStatus(
-          voiceDuplicateMessage || "Bu ses zaten sistemde kayıtlı."
+          voiceDuplicateMessage || "Bu ses zaten sistemde kayıtlı.",
         );
         return;
       }
@@ -736,10 +817,9 @@ export function initEnroll() {
 
           if (precheck?.duplicate) {
             voiceDuplicateBlocked = true;
-            voiceDuplicateMessage =
-              precheck?.matched_username
-                ? `Bu ses zaten ${precheck.matched_username} kullanıcısına kayıtlı.`
-                : "Bu ses zaten sistemde kayıtlı.";
+            voiceDuplicateMessage = precheck?.matched_username
+              ? `Bu ses zaten ${precheck.matched_username} kullanıcısına kayıtlı.`
+              : "Bu ses zaten sistemde kayıtlı.";
 
             setVoiceStatus(voiceDuplicateMessage);
             updateStepButtons();
@@ -749,7 +829,9 @@ export function initEnroll() {
           voiceDuplicateChecked = true;
         } catch (e) {
           console.error(e);
-          setVoiceStatus(`Voice precheck failed: ${e.message || "UNKNOWN_ERROR"}`);
+          setVoiceStatus(
+            `Voice precheck failed: ${e.message || "UNKNOWN_ERROR"}`,
+          );
           updateStepButtons();
           return;
         }
@@ -774,12 +856,12 @@ export function initEnroll() {
         voiceEnrollmentCompleted = true;
         updateVoicePrompt();
         setVoiceStatus(
-          `Voice samples completed (${voiceSamples.length}/${VOICE_TARGET_SAMPLES}).`
+          `Voice samples completed (${voiceSamples.length}/${VOICE_TARGET_SAMPLES}).`,
         );
       } else {
         updateVoicePrompt();
         setVoiceStatus(
-          `Sample ${voiceSamples.length}/${VOICE_TARGET_SAMPLES} saved.`
+          `Sample ${voiceSamples.length}/${VOICE_TARGET_SAMPLES} saved.`,
         );
       }
 
@@ -796,7 +878,7 @@ export function initEnroll() {
         setVoiceStatus("Sentence was not matched clearly. Please try again.");
       } else {
         setVoiceStatus(
-          `Voice recording failed: ${e.message || "UNKNOWN_ERROR"}`
+          `Voice recording failed: ${e.message || "UNKNOWN_ERROR"}`,
         );
       }
     } finally {
@@ -832,10 +914,65 @@ export function initEnroll() {
     showFaceStep();
   });
 
-  // ---------- Final submit ----------
-  btnGoComplete?.addEventListener("click", async () => {
+  btnBackToVoice?.addEventListener("click", () => {
+    showVoiceStep();
+  });
+
+  // ---------- Voice -> Security ----------
+  btnGoComplete?.addEventListener("click", () => {
+    if (faceDuplicateBlocked) {
+      setStatus(faceDuplicateMessage || "Bu yüz zaten sistemde kayıtlı.");
+      return;
+    }
+
+    if (voiceDuplicateBlocked) {
+      setVoiceStatus(voiceDuplicateMessage || "Bu ses zaten sistemde kayıtlı.");
+      return;
+    }
+
+    if (!faceEnrollmentCompleted) {
+      setStatus("Complete face enrollment first.");
+      return;
+    }
+
+    if (!voiceEnrollmentCompleted) {
+      setVoiceStatus("Complete voice enrollment first.");
+      return;
+    }
+
+    showSecurityStep();
+  });
+
+  // ---------- Security + Final submit ----------
+  btnSaveSecurityQuestions?.addEventListener("click", async () => {
     try {
       const faceSamples = getFlattenedFaceSamples();
+
+      const q1 = Number(securityQuestion1El?.value);
+      const q2 = Number(securityQuestion2El?.value);
+      const q3 = Number(securityQuestion3El?.value);
+
+      const a1 = (securityAnswer1El?.value || "").trim();
+      const a2 = (securityAnswer2El?.value || "").trim();
+      const a3 = (securityAnswer3El?.value || "").trim();
+
+      if (!q1 || !q2 || !q3) {
+        setText(securityEnrollStatusEl, "Please select 3 security questions.");
+        return;
+      }
+
+      if (new Set([q1, q2, q3]).size !== 3) {
+        setText(
+          securityEnrollStatusEl,
+          "Security questions must be different.",
+        );
+        return;
+      }
+
+      if (!a1 || !a2 || !a3) {
+        setText(securityEnrollStatusEl, "All security answers are required.");
+        return;
+      }
 
       if (faceDuplicateBlocked) {
         setStatus(faceDuplicateMessage || "Bu yüz zaten sistemde kayıtlı.");
@@ -843,7 +980,9 @@ export function initEnroll() {
       }
 
       if (voiceDuplicateBlocked) {
-        setVoiceStatus(voiceDuplicateMessage || "Bu ses zaten sistemde kayıtlı.");
+        setVoiceStatus(
+          voiceDuplicateMessage || "Bu ses zaten sistemde kayıtlı.",
+        );
         return;
       }
 
@@ -870,6 +1009,7 @@ export function initEnroll() {
       biometricSubmitCompleted = false;
       updateStepButtons();
 
+      setText(securityEnrollStatusEl, "Saving enrollment...");
       setStatus("Sending biometric enrollment...");
       setVoiceStatus("Submitting biometric data...");
 
@@ -877,7 +1017,7 @@ export function initEnroll() {
         username,
         role,
         faceSamples,
-        voiceSamples
+        voiceSamples,
       );
 
       if (!response?.success) {
@@ -886,32 +1026,30 @@ export function initEnroll() {
 
         const rawMessage = String(response?.message || "ENROLLMENT_FAILED");
 
-        if (rawMessage.startsWith("FACE_ALREADY_REGISTERED_OTHER_USER")) {
-          setStatus(
-            "Bu yüz zaten sistemde kayıtlı. Enrollment işlemi durduruldu."
-          );
-          setVoiceStatus("Aynı yüz başka bir kullanıcıya ait görünüyor.");
-          return;
-        }
-
-        if (rawMessage.startsWith("VOICE_ALREADY_REGISTERED_OTHER_USER")) {
-          setStatus(
-            "Bu ses zaten sistemde kayıtlı. Enrollment işlemi durduruldu."
-          );
-          setVoiceStatus("Aynı ses başka bir kullanıcıya ait görünüyor.");
-          return;
-        }
-
-        if (rawMessage === "USER_ALREADY_HAS_FACE_DATA") {
-          setStatus("Bu kullanıcı için zaten yüz kaydı mevcut.");
-          setVoiceStatus("Yeni kayıt işlemi durduruldu.");
-          return;
-        }
-
         setStatus(`Enrollment failed: ${rawMessage}`);
         setVoiceStatus(`Enrollment failed: ${rawMessage}`);
+        setText(securityEnrollStatusEl, "Biometric enrollment failed.");
         return;
       }
+
+      const userId = response.user_id;
+
+      if (!userId) {
+        setText(
+          securityEnrollStatusEl,
+          "User id not returned from enrollment.",
+        );
+        return;
+      }
+
+      await apiSaveSecurityAnswers({
+        user_id: userId,
+        answers: [
+          { question_id: q1, answer: a1 },
+          { question_id: q2, answer: a2 },
+          { question_id: q3, answer: a3 },
+        ],
+      });
 
       biometricSubmitCompleted = true;
       updateStepButtons();
@@ -921,15 +1059,20 @@ export function initEnroll() {
 
       setStatus(successMessage);
       setVoiceStatus("Enrollment completed.");
+      setText(securityEnrollStatusEl, "Security questions saved.");
+
       showCompleteStep(successMessage);
     } catch (e) {
       console.error(e);
+
       biometricSubmitCompleted = false;
       updateStepButtons();
 
       const msg = e?.message || "UNKNOWN_ERROR";
+
       setStatus(`Enrollment failed: ${msg}`);
       setVoiceStatus(`Enrollment failed: ${msg}`);
+      setText(securityEnrollStatusEl, `Security save failed: ${msg}`);
     }
   });
 

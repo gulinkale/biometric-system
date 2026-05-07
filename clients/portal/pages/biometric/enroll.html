@@ -15,7 +15,8 @@
           <div>
             <h2>Biometric Enrollment</h2>
             <p class="section-copy">
-              Complete your face and voice enrollment to activate biometric authentication for your portal account.
+              Complete your face and voice enrollment to activate biometric
+              authentication for your portal account.
             </p>
           </div>
 
@@ -32,10 +33,11 @@
       <!-- SINGLE STEP CARD -->
       <div class="card enroll-main-card enroll-step-card">
         <div class="enroll-step-header">
-          <p id="stepIndicator" class="step-indicator">Step 1 of 2</p>
+          <p id="stepIndicator" class="step-indicator">Step 1 of 3</p>
           <h2 id="stepTitle">Face Enrollment</h2>
           <p id="stepDescription" class="section-copy">
-            Start the camera, then begin enrollment. The system will collect multiple face samples automatically.
+            Start the camera, then begin enrollment. The system will collect
+            multiple face samples automatically.
           </p>
         </div>
 
@@ -50,8 +52,12 @@
           <canvas id="camCanvas" class="hidden"></canvas>
 
           <div class="button-row compact-actions">
-            <button class="btn" id="btnStartCam" type="button">Start Camera</button>
-            <button class="btn" id="btnStopCam" type="button">Stop Camera</button>
+            <button class="btn" id="btnStartCam" type="button">
+              Start Camera
+            </button>
+            <button class="btn" id="btnStopCam" type="button">
+              Stop Camera
+            </button>
           </div>
 
           <div class="progress-shell">
@@ -68,7 +74,16 @@
           <p id="angleStatus" class="status-line">Required angle: center</p>
           <div
             id="angleGuide"
-            style="margin-top:8px; background:#0f172a; color:#f8fafc; border-radius:10px; padding:14px 16px; font-size:1rem; font-weight:700; text-align:center;"
+            style="
+              margin-top: 8px;
+              background: #0f172a;
+              color: #f8fafc;
+              border-radius: 10px;
+              padding: 14px 16px;
+              font-size: 1rem;
+              font-weight: 700;
+              text-align: center;
+            "
           >
             Turn your HEAD as instructed below.
           </div>
@@ -76,12 +91,16 @@
           <p id="statusText" class="status-line">Ready.</p>
 
           <div class="button-row compact-actions">
-            <button class="btn" id="btnStartEnroll" type="button">Start Enrollment</button>
+            <button class="btn" id="btnStartEnroll" type="button">
+              Start Enrollment
+            </button>
             <button class="btn" id="btnStopEnroll" type="button">Stop</button>
           </div>
 
           <div class="button-row compact-actions">
-            <button class="btn" id="btnGoVoice" type="button">Continue to Voice</button>
+            <button class="btn" id="btnGoVoice" type="button">
+              Continue to Voice
+            </button>
           </div>
         </div>
 
@@ -95,48 +114,117 @@
             <p id="voiceChallengePrompt" class="status-line">
               Okunacak metin burada gorunecek.
             </p>
-            <p id="voiceSampleProgress" class="status-line">
-              Sample 1/10
-            </p>
+            <p id="voiceSampleProgress" class="status-line">Sample 1/10</p>
 
             <div class="button-row compact-actions">
-              <button class="btn" id="btnVoiceStart" type="button">Record Read-Aloud Sample</button>
+              <button class="btn" id="btnVoiceStart" type="button">
+                Record Read-Aloud Sample
+              </button>
             </div>
 
             <div class="button-row compact-actions">
-              <span class="status-line" id="voiceTranscriptPreview">Waiting for phrase...</span>
+              <span class="status-line" id="voiceTranscriptPreview"
+                >Waiting for phrase...</span
+              >
             </div>
 
-            <audio id="audioPreview" class="hidden audio-preview" controls></audio>
+            <audio
+              id="audioPreview"
+              class="hidden audio-preview"
+              controls
+            ></audio>
 
             <p id="voiceStatus" class="status-line">Ready.</p>
           </div>
 
           <div class="button-row compact-actions">
-            <button class="btn" id="btnBackToFace" type="button">Back to Face</button>
-            <button class="btn" id="btnGoComplete" type="button">Finish Enrollment</button>
+            <button class="btn" id="btnBackToFace" type="button">
+              Back to Face
+            </button>
+            <button class="btn" id="btnGoComplete" type="button">
+              Finish Enrollment
+            </button>
           </div>
         </div>
 
-        <!-- STEP 3: COMPLETE -->
+        <!-- STEP 3: SECURITY QUESTIONS -->
+        <div id="securityStep" class="hidden">
+          <div class="voice-step-box">
+            <div class="security-question-grid">
+              <div class="security-question-item">
+                <label for="securityQuestion1">Question 1</label>
+                <select id="securityQuestion1" class="auth-input"></select>
+                <input
+                  id="securityAnswer1"
+                  class="auth-input"
+                  type="text"
+                  placeholder="Answer 1"
+                />
+              </div>
+
+              <div class="security-question-item">
+                <label for="securityQuestion2">Question 2</label>
+                <select id="securityQuestion2" class="auth-input"></select>
+                <input
+                  id="securityAnswer2"
+                  class="auth-input"
+                  type="text"
+                  placeholder="Answer 2"
+                />
+              </div>
+
+              <div class="security-question-item">
+                <label for="securityQuestion3">Question 3</label>
+                <select id="securityQuestion3" class="auth-input"></select>
+                <input
+                  id="securityAnswer3"
+                  class="auth-input"
+                  type="text"
+                  placeholder="Answer 3"
+                />
+              </div>
+            </div>
+            <p id="securityEnrollStatus" class="status-line">Ready.</p>
+          </div>
+
+          <div class="button-row compact-actions">
+            <button class="btn" id="btnBackToVoice" type="button">
+              Back to Voice
+            </button>
+
+            <button class="btn" id="btnSaveSecurityQuestions" type="button">
+              Save Security Questions
+            </button>
+          </div>
+        </div>
+
+        <!-- STEP 4: COMPLETE -->
         <div id="completeStep" class="hidden">
           <div class="complete-box">
             <h3>Enrollment Completed</h3>
             <p class="section-copy">
-              Your biometric enrollment steps have been completed. You can now return to the dashboard or continue to identity verification.
+              Your biometric enrollment steps have been completed. You can now
+              return to the dashboard or continue to identity verification.
             </p>
 
             <p id="completeStatus" class="status-line">Ready.</p>
           </div>
 
           <div class="button-row compact-actions">
-            <a class="btn back-link-btn" href="../portal/dashboard_portal.html">Back to Dashboard</a>
-            <a class="btn back-link-btn" href="../biometric/identify.html">Go to Verification</a>
+            <a class="btn back-link-btn" href="../portal/dashboard_portal.html"
+              >Back to Dashboard</a
+            >
+            <a class="btn back-link-btn" href="../biometric/identify.html"
+              >Go to Verification</a
+            >
           </div>
         </div>
       </div>
     </div>
 
-    <script type="module" src="../../assets/js/index.js?v=20260314-liveness-preview"></script>
+    <script
+      type="module"
+      src="../../assets/js/index.js?v=20260314-liveness-preview"
+    ></script>
   </body>
 </html>
