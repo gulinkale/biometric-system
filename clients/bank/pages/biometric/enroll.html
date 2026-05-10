@@ -16,8 +16,8 @@
           <div>
             <h2>Biometric Enrollment</h2>
             <p class="section-copy">
-              Complete your face and voice enrollment to activate biometric
-              authentication for your portal account.
+              Complete your face, voice, and security question setup to activate
+              biometric authentication for your portal account.
             </p>
           </div>
 
@@ -31,18 +31,20 @@
         </p>
       </div>
 
-      <!-- SINGLE STEP CARD -->
+      <!-- MAIN CARD -->
       <div class="card enroll-main-card enroll-step-card">
         <div class="enroll-step-header">
           <p id="stepIndicator" class="step-indicator">Step 1 of 3</p>
+
           <h2 id="stepTitle">Face Enrollment</h2>
+
           <p id="stepDescription" class="section-copy">
-            Start the camera, then begin enrollment. The system will collect
-            multiple face samples automatically.
+            Start the camera and collect biometric samples for secure
+            authentication.
           </p>
         </div>
 
-        <!-- STEP 1: FACE -->
+        <!-- STEP 1 : FACE -->
         <div id="faceStep">
           <video
             id="camVideo"
@@ -50,12 +52,14 @@
             playsinline
             class="camera-frame"
           ></video>
+
           <canvas id="camCanvas" class="hidden"></canvas>
 
           <div class="button-row compact-actions">
             <button class="btn" id="btnStartCam" type="button">
               Start Camera
             </button>
+
             <button class="btn" id="btnStopCam" type="button">
               Stop Camera
             </button>
@@ -63,8 +67,9 @@
 
           <div class="progress-shell">
             <div class="progress-head">
-              <span class="progress-label">Progress:</span>
-              <span id="progressText" class="progress-value">0/15</span>
+              <span class="progress-label">Face Samples</span>
+
+              <span id="progressText" class="progress-value">0 / 15</span>
             </div>
 
             <div class="progress-track">
@@ -72,30 +77,36 @@
             </div>
           </div>
 
-          <p id="angleStatus" class="status-line">Required angle: center</p>
+          <p id="angleStatus" class="status-line">
+            Required angle: center
+          </p>
+
           <div
             id="angleGuide"
             style="
               margin-top: 8px;
               background: #0f172a;
               color: #f8fafc;
-              border-radius: 10px;
+              border-radius: 12px;
               padding: 14px 16px;
               font-size: 1rem;
               font-weight: 700;
               text-align: center;
             "
           >
-            Turn your HEAD as instructed below.
+            Turn your head as instructed below.
           </div>
 
           <p id="statusText" class="status-line">Ready.</p>
 
           <div class="button-row compact-actions">
             <button class="btn" id="btnStartEnroll" type="button">
-              Start Enrollment
+              Start Face Enrollment
             </button>
-            <button class="btn" id="btnStopEnroll" type="button">Stop</button>
+
+            <button class="btn" id="btnStopEnroll" type="button">
+              Stop
+            </button>
           </div>
 
           <div class="button-row compact-actions">
@@ -105,28 +116,58 @@
           </div>
         </div>
 
-        <!-- STEP 2: VOICE -->
+        <!-- STEP 2 : VOICE -->
         <div id="voiceStep" class="hidden">
           <div class="voice-step-box">
-            <p class="section-copy">
-              Read each shown sentence clearly and record your voice template.
-            </p>
+            <div class="voice-challenge-card">
+              <p class="mini-label">
+                Please read the following sentence clearly
+              </p>
 
-            <p id="voiceChallengePrompt" class="status-line">
-              Okunacak metin burada gorunecek.
-            </p>
-            <p id="voiceSampleProgress" class="status-line">Sample 1/10</p>
-
-            <div class="button-row compact-actions">
-              <button class="btn" id="btnVoiceStart" type="button">
-                Record Read-Aloud Sample
-              </button>
+              <p id="voiceChallengePrompt" class="voice-prompt-text">
+                Sentence will appear here.
+              </p>
             </div>
 
-            <div class="button-row compact-actions">
-              <span class="status-line" id="voiceTranscriptPreview"
-                >Waiting for phrase...</span
-              >
+            <div class="progress-shell voice-progress-shell">
+              <div class="progress-head">
+                <span class="progress-label">Voice Samples</span>
+
+                <span id="voiceSampleProgress" class="progress-value">
+                  Saved 0 / 10 samples
+                </span>
+              </div>
+
+              <div class="progress-track">
+                <div id="voiceProgressBar" class="progress-bar"></div>
+              </div>
+            </div>
+
+            <button
+              class="btn voice-record-btn"
+              id="btnVoiceStart"
+              type="button"
+            >
+              Start Recording
+            </button>
+
+            <div class="voice-status-panel">
+              <div class="mic-pulse"></div>
+
+              <div>
+                <p class="mini-label">Recognition Preview</p>
+
+                <p
+                  id="voiceTranscriptPreview"
+                  class="voice-transcript-text"
+                >
+                  Waiting for phrase...
+                </p>
+
+                <p id="voiceStatus" class="status-line">
+                  System ready for recording.
+                </p>
+              </div>
             </div>
 
             <audio
@@ -134,27 +175,28 @@
               class="hidden audio-preview"
               controls
             ></audio>
-
-            <p id="voiceStatus" class="status-line">Ready.</p>
           </div>
 
           <div class="button-row compact-actions">
-            <button class="btn" id="btnBackToFace" type="button">
-              Back to Face
+            <button class="btn secondary-btn" id="btnBackToFace" type="button">
+              Retake Face Scan
             </button>
+
             <button class="btn" id="btnGoComplete" type="button">
-              Finish Enrollment
+              Continue to Security Questions
             </button>
           </div>
         </div>
 
-        <!-- STEP 3: SECURITY QUESTIONS -->
+        <!-- STEP 3 : SECURITY QUESTIONS -->
         <div id="securityStep" class="hidden">
           <div class="voice-step-box">
             <div class="security-question-grid">
               <div class="security-question-item">
                 <label for="securityQuestion1">Question 1</label>
+
                 <select id="securityQuestion1" class="auth-input"></select>
+
                 <input
                   id="securityAnswer1"
                   class="auth-input"
@@ -165,7 +207,9 @@
 
               <div class="security-question-item">
                 <label for="securityQuestion2">Question 2</label>
+
                 <select id="securityQuestion2" class="auth-input"></select>
+
                 <input
                   id="securityAnswer2"
                   class="auth-input"
@@ -176,7 +220,9 @@
 
               <div class="security-question-item">
                 <label for="securityQuestion3">Question 3</label>
+
                 <select id="securityQuestion3" class="auth-input"></select>
+
                 <input
                   id="securityAnswer3"
                   class="auth-input"
@@ -185,39 +231,55 @@
                 />
               </div>
             </div>
-            <p id="securityEnrollStatus" class="status-line">Ready.</p>
+
+            <p id="securityEnrollStatus" class="status-line">
+              Ready.
+            </p>
           </div>
 
           <div class="button-row compact-actions">
-            <button class="btn" id="btnBackToVoice" type="button">
+            <button class="btn secondary-btn" id="btnBackToVoice" type="button">
               Back to Voice
             </button>
 
-            <button class="btn" id="btnSaveSecurityQuestions" type="button">
+            <button
+              class="btn"
+              id="btnSaveSecurityQuestions"
+              type="button"
+            >
               Save Security Questions
             </button>
           </div>
         </div>
 
-        <!-- STEP 4: COMPLETE -->
+        <!-- STEP 4 : COMPLETE -->
         <div id="completeStep" class="hidden">
           <div class="complete-box">
             <h3>Enrollment Completed</h3>
+
             <p class="section-copy">
-              Your biometric enrollment steps have been completed. You can now
-              return to the dashboard or continue to identity verification.
+              Your biometric enrollment has been completed successfully.
             </p>
 
-            <p id="completeStatus" class="status-line">Ready.</p>
+            <p id="completeStatus" class="status-line">
+              Ready.
+            </p>
           </div>
 
           <div class="button-row compact-actions">
-            <a class="btn back-link-btn" href="../portal/dashboard_portal.html"
-              >Back to Dashboard</a
+            <a
+              class="btn back-link-btn"
+              href="../portal/dashboard_portal.html"
             >
-            <a class="btn back-link-btn" href="../biometric/identify.html"
-              >Go to Verification</a
+              Back to Dashboard
+            </a>
+
+            <a
+              class="btn back-link-btn"
+              href="../biometric/identify.html"
             >
+              Go to Verification
+            </a>
           </div>
         </div>
       </div>
