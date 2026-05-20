@@ -30,6 +30,8 @@ from app.services.security_question_service import (
     save_user_answers,
 )
 
+from app.domain.reason_codes import normalize_reason_code
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/enroll", tags=["enroll"])
@@ -51,6 +53,17 @@ async def _require_existing_user(session: AsyncSession, username: str, client: s
 def _normalize_vector(vec: np.ndarray) -> np.ndarray:
     return vec / (np.linalg.norm(vec) + 1e-9)
 
+
+def _reason(value: str) -> str:
+    if not value:
+        return normalize_reason_code("UNKNOWN")
+
+    raw = str(value).strip()
+
+    if raw.upper() == "OK":
+        return "OK"
+
+    return normalize_reason_code(raw)
 
 @router.post("/precheck/face", response_model=FacePrecheckResponse)
 async def precheck_face_duplicate(
@@ -77,7 +90,7 @@ async def precheck_face_duplicate(
     if emb is None:
         return FacePrecheckResponse(
             duplicate=False,
-            reason="FACE_EMBEDDING_FAILED",
+            reason=_reason("ENROLL_FACE_EMBEDDING_FAILED"),
             matched_username=None,
             matched_user_id=None,
             similarity=0.0,
@@ -85,6 +98,10 @@ async def precheck_face_duplicate(
 
     emb = _normalize_vector(np.asarray(emb, dtype=np.float32).reshape(-1))
     result = await _auth_service.precheck_face_duplicate(session, username, emb, x_client)
+
+    if result.get("reason"):
+        result["reason"] = _reason(result["reason"])
+
     return FacePrecheckResponse(**result)
 
 
@@ -98,7 +115,7 @@ async def precheck_voice_duplicate(
     if not username:
         raise HTTPException(status_code=400, detail="USERNAME_EMPTY")
 
-    await _require_existing_user(session, username,x_client)
+    await _require_existing_user(session, username, x_client)
 
     try:
         audio, sr = b64_to_wav_mono(req.voice_wav_b64)
@@ -109,14 +126,18 @@ async def precheck_voice_duplicate(
     if emb is None:
         return VoicePrecheckResponse(
             duplicate=False,
-            reason="VOICE_EMBEDDING_FAILED",
+            reason=_reason("ENROLL_VOICE_EMBEDDING_FAILED"),
             matched_username=None,
             matched_user_id=None,
             similarity=0.0,
         )
 
     emb = _normalize_vector(np.asarray(emb, dtype=np.float32).reshape(-1))
-    result = await _auth_service.precheck_voice_duplicate(session, username, emb,x_client)
+    result = await _auth_service.precheck_voice_duplicate(session, username, emb, x_client)
+    
+    if result.get("reason"):
+        result["reason"] = _reason(result["reason"])
+
     return VoicePrecheckResponse(**result)
 
 
@@ -124,7 +145,7 @@ async def precheck_voice_duplicate(
 async def enroll_biometric(
     req: BiometricEnrollRequest,
     session: AsyncSession = Depends(get_session),
-     x_client: str = Header(default="portal", alias="X-Client"),
+    x_client: str = Header(default="portal", alias="X-Client"),
 ):
     username = (req.username or "").strip()
     role = (req.role or "").strip()
@@ -132,16 +153,16 @@ async def enroll_biometric(
     voice_samples = req.voice_samples or []
 
     if not username:
-        return BiometricEnrollResponse(success=False, message="USERNAME_EMPTY")
+        return BiometricEnrollResponse(success=False, message=_reason("USERNAME_EMPTY"))
 
     if not role:
-        return BiometricEnrollResponse(success=False, message="ROLE_EMPTY")
+        return BiometricEnrollResponse(success=False, message=_reason("ROLE_EMPTY"))
 
     if not face_samples:
-        return BiometricEnrollResponse(success=False, message="FACE_SAMPLES_EMPTY")
+        return BiometricEnrollResponse(success=False, message=_reason("FACE_SAMPLES_EMPTY"))
 
     if not voice_samples:
-        return BiometricEnrollResponse(success=False, message="VOICE_SAMPLES_EMPTY")
+        return BiometricEnrollResponse(success=False, message=_reason("VOICE_SAMPLES_EMPTY"))
 
     user = await _require_existing_user(session, username, x_client)
 
@@ -163,7 +184,7 @@ async def enroll_biometric(
             if angle not in REQUIRED_FACE_ANGLES:
                 return BiometricEnrollResponse(
                     success=False,
-                    message=f"INVALID_FACE_ANGLE:{angle}",
+                    message=_reason("ENROLL_INVALID_FACE_ANGLE"),
                     user_id=None,
                     face_status="failed",
                     voice_status="not_processed",
@@ -178,7 +199,7 @@ async def enroll_biometric(
                 if emb is None:
                     return BiometricEnrollResponse(
                         success=False,
-                        message="FACE_EMBEDDING_FAILED",
+                        message=_reason("ENROLL_FACE_EMBEDDING_FAILED"),
                         user_id=None,
                         face_status="failed",
                         voice_status="not_processed",
@@ -187,7 +208,7 @@ async def enroll_biometric(
                 if detected_pose and detected_pose != angle:
                     return BiometricEnrollResponse(
                         success=False,
-                        message=f"FACE_POSE_MISMATCH:expected={angle},detected={detected_pose}",
+                        message=_reason("ENROLL_FACE_POSE_MISMATCH"),
                         user_id=None,
                         face_status="failed",
                         voice_status="not_processed",
@@ -197,7 +218,7 @@ async def enroll_biometric(
                 if emb is None:
                     return BiometricEnrollResponse(
                         success=False,
-                        message="FACE_EMBEDDING_FAILED",
+                        message=_reason("ENROLL_FACE_EMBEDDING_FAILED"),
                         user_id=None,
                         face_status="failed",
                         voice_status="not_processed",
@@ -210,7 +231,7 @@ async def enroll_biometric(
             if len(angle_embeddings[angle]) < REQUIRED_FACE_SAMPLES_PER_ANGLE:
                 return BiometricEnrollResponse(
                     success=False,
-                    message=f"INSUFFICIENT_FACE_SAMPLES_{angle.upper()}",
+                    message=_reason("ENROLL_INSUFFICIENT_FACE_SAMPLES"),
                     user_id=None,
                     face_status="failed",
                     voice_status="not_processed",
@@ -230,7 +251,7 @@ async def enroll_biometric(
     except Exception as e:
         return BiometricEnrollResponse(
             success=False,
-            message=f"FACE_PROCESSING_ERROR:{e}",
+            message=_reason("ENROLL_FACE_EMBEDDING_FAILED"),
             user_id=None,
             face_status="failed",
             voice_status="not_processed",
@@ -243,7 +264,7 @@ async def enroll_biometric(
         if len(voice_samples) < REQUIRED_TOTAL_VOICE_SAMPLES:
             return BiometricEnrollResponse(
                 success=False,
-                message="VOICE_SAMPLES_INSUFFICIENT",
+                message=_reason("ENROLL_VOICE_SAMPLES_INSUFFICIENT"),
                 user_id=None,
                 face_status=face_status,
                 voice_status="failed",
@@ -262,7 +283,7 @@ async def enroll_biometric(
             if not prompt_text:
                 return BiometricEnrollResponse(
                     success=False,
-                    message="VOICE_PROMPT_TEXT_EMPTY",
+                    message=_reason("ENROLL_VOICE_PROMPT_EMPTY"),
                     user_id=None,
                     face_status=face_status,
                     voice_status="failed",
@@ -274,7 +295,7 @@ async def enroll_biometric(
             if emb is None:
                 return BiometricEnrollResponse(
                     success=False,
-                    message="VOICE_EMBEDDING_FAILED",
+                    message=_reason("ENROLL_VOICE_EMBEDDING_FAILED"),
                     user_id=None,
                     face_status=face_status,
                     voice_status="failed",
@@ -286,7 +307,7 @@ async def enroll_biometric(
         if len(voice_embeddings) < REQUIRED_TOTAL_VOICE_SAMPLES:
             return BiometricEnrollResponse(
                 success=False,
-                message="VOICE_SAMPLES_INVALID",
+                message=_reason("ENROLL_VOICE_SAMPLES_INSUFFICIENT"),
                 user_id=None,
                 face_status=face_status,
                 voice_status="failed",
@@ -301,7 +322,7 @@ async def enroll_biometric(
     except Exception as e:
         return BiometricEnrollResponse(
             success=False,
-            message=f"VOICE_PROCESSING_ERROR:{e}",
+            message=_reason("ENROLL_VOICE_EMBEDDING_FAILED"),
             user_id=None,
             face_status=face_status,
             voice_status="failed",
@@ -331,7 +352,7 @@ async def enroll_biometric(
                 await session.rollback()
                 return BiometricEnrollResponse(
                     success=False,
-                    message="USER_NOT_FOUND",
+                    message=_reason("USER_NOT_FOUND"),
                     user_id=None,
                     face_status="failed",
                     voice_status="failed",
@@ -341,11 +362,7 @@ async def enroll_biometric(
                 await session.rollback()
                 return BiometricEnrollResponse(
                     success=False,
-                    message=(
-                        "FACE_ALREADY_REGISTERED_OTHER_USER:"
-                        f"username={face_result.get('other_username')},"
-                        f"similarity={float(face_result.get('similarity', 0.0)):.4f}"
-                    ),
+                    message=_reason("FACE_ALREADY_REGISTERED_OTHER_USER"),
                     user_id=face_result.get("other_user_id"),
                     face_status="duplicate_face",
                     voice_status="not_processed",
@@ -362,7 +379,7 @@ async def enroll_biometric(
                 await session.rollback()
                 return BiometricEnrollResponse(
                     success=False,
-                    message="USER_NOT_FOUND",
+                    message=_reason("USER_NOT_FOUND"),
                     user_id=None,
                     face_status="failed",
                     voice_status="failed",
@@ -372,11 +389,7 @@ async def enroll_biometric(
                 await session.rollback()
                 return BiometricEnrollResponse(
                     success=False,
-                    message=(
-                        "VOICE_ALREADY_REGISTERED_OTHER_USER:"
-                        f"username={voice_result.get('other_username')},"
-                        f"similarity={float(voice_result.get('similarity', 0.0)):.4f}"
-                    ),
+                    message=_reason("VOICE_ALREADY_REGISTERED_OTHER_USER"),
                     user_id=voice_result.get("other_user_id"),
                     face_status=face_status,
                     voice_status="duplicate_voice",
@@ -404,7 +417,7 @@ async def enroll_biometric(
         await session.rollback()
         return BiometricEnrollResponse(
             success=False,
-            message=f"BIOMETRIC_SAVE_ERROR:{e}",
+            message=_reason("ENROLL_SAVE_ERROR"),
             user_id=None,
             face_status="failed",
             voice_status="failed",
