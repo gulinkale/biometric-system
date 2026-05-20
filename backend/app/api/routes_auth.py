@@ -15,6 +15,7 @@ from app.domain.schemas import (
 from app.services.authentication_service import AuthenticationService
 from app.utils.audio_io import b64_to_wav_mono
 from app.utils.image_io import b64_to_bgr_image
+from app.domain.reason_codes import normalize_reason_code
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -23,6 +24,19 @@ _auth_service = AuthenticationService()
 
 def _bad_request(msg: str) -> None:
     raise HTTPException(status_code=400, detail=msg)
+
+
+def _reason(value: str) -> str:
+    """Normalize verify failure reasons while preserving success/status labels."""
+    if not value:
+        return normalize_reason_code("UNKNOWN")
+
+    raw = str(value).strip()
+
+    if raw.upper() in {"OK", "DONE", "ACCEPTED", "GRANTED"}:
+        return raw.upper()
+
+    return normalize_reason_code(raw)
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -122,5 +136,13 @@ async def verify(
     result.setdefault("voice_score", 0.0)
     result.setdefault("spoof_score", None)
     result.setdefault("spoof_decision", None)
+
+    decision = str(result.get("decision") or "").upper()
+    raw_reason = str(result.get("reason") or "UNKNOWN")
+
+    if decision in {"ACCEPTED", "GRANTED"}:
+        result["reason"] = raw_reason
+    else:
+        result["reason"] = _reason(raw_reason)
 
     return VerifyResponse(**result)
