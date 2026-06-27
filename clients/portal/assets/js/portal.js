@@ -1,4 +1,4 @@
-import { apiLogin } from "./api.js";
+import { apiGetBiometricStatus, apiLogin } from "./api.js";
 
 // frontend/assets/js/portal.js
 
@@ -12,6 +12,25 @@ window.portal = {
     const usernameInput = document.getElementById("username");
     const passwordInput = document.getElementById("password");
     const loginMessage = document.getElementById("loginMessage");
+
+    async function redirectAfterBiometricStatus(username, role) {
+      const status = await apiGetBiometricStatus();
+
+      if (!status?.face_enrolled) {
+        window.location.href = `../biometric/enroll.html?username=${encodeURIComponent(
+          username
+        )}&role=${encodeURIComponent(role)}`;
+        return;
+      }
+
+      if (loginMessage) {
+        loginMessage.textContent = "Biometric verification is required.";
+      }
+
+      setTimeout(() => {
+        window.location.href = "../biometric/identify.html";
+      }, 600);
+    }
 
     if (biometricBtn) {
       biometricBtn.addEventListener("click", (e) => {
@@ -35,12 +54,15 @@ window.portal = {
         return;
       }
 
+      let loginSucceeded = false;
+
       try {
         const data = await apiLogin(username, password);
         console.log("[PORTAL] response data:", data);
+        loginSucceeded = true;
 
         if (loginMessage) {
-          loginMessage.textContent = "Login successful. Redirecting...";
+          loginMessage.textContent = "Login successful. Checking biometric status...";
         }
 
         localStorage.setItem("portalUsername", data.username);
@@ -48,14 +70,14 @@ window.portal = {
         localStorage.setItem("portalLoggedIn", "true");
         localStorage.setItem("accessToken", data.access_token);
 
-        setTimeout(() => {
-          window.location.href = "../portal/dashboard_portal.html";
-        }, 600);
+        await redirectAfterBiometricStatus(data.username, data.role);
       } catch (error) {
         console.error("[PORTAL LOGIN ERROR]", error);
         if (loginMessage) {
           loginMessage.textContent =
-            error.message === "NETWORK_ERROR"
+            loginSucceeded
+              ? "Could not check biometric status."
+              : error.message === "NETWORK_ERROR"
               ? "Could not connect to the server."
               : error.message || "Login failed.";
         }
